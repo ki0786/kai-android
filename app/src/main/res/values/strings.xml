@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KAI</string>
+    <string name="home_tagline">Your voice-first Android assistant</string>
+    <string name="cta_voice">Start voice session</string>
+    <string name="cta_chat">Open text chat</string>
+    <string name="mic_idle">Mic off</string>
+    <string name="mic_listening">Listening</string>
+    <string name="mic_processing">Processing</string>
+    <string name="privacy_no_background">KAI does not record in the background.</string>
+</resources>

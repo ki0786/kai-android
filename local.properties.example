@@ -1,0 +1,8 @@
+## Copy to local.properties (gitignored) and adjust for your machine.
+## Android Studio usually writes sdk.dir automatically.
+
+# sdk.dir=/Users/YOU/Library/Android/sdk
+
+## Backend base URL for the KAI API (no trailing slash).
+## Defaults to http://10.0.2.2:8000 on emulator if unset.
+KAI_API_BASE_URL=http://10.0.2.2:8000
