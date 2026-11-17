@@ -9,12 +9,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier.modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -23,6 +24,7 @@ enum class MicStatus {
     Off,
     Listening,
     Processing,
+    Speaking,
 }
 
 @Composable
@@ -34,6 +36,7 @@ fun MicStatusChip(
         MicStatus.Off -> Triple("Mic off", MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.MicOff)
         MicStatus.Listening -> Triple("Listening", Color(0xFF059669), Icons.Filled.Mic)
         MicStatus.Processing -> Triple("Processing", Color(0xFFD97706), Icons.Filled.Mic)
+        MicStatus.Speaking -> Triple("Speaking", Color(0xFF2563EB), Icons.Filled.VolumeUp)
     }
 
     Row(

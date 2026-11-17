@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,11 +30,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,15 +42,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier.modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.kai.assistant.api.KaiApiClient
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kai.assistant.assistant.AssistantTurnProcessor
+import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
-import kotlinx.coroutines.Dispatchers
+import com.kai.assistant.tools.LocalMatch
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,32 +59,63 @@ fun TextChatScreen(
     onBack: () -> Unit,
     onOpenVoice: () -> Unit,
 ) {
-    val messages = remember {
-        mutableStateListOf<ChatMessage>().also { list ->
-            val existing = SessionMessageStore.snapshot()
-            if (existing.isEmpty()) {
-                val welcome = ChatMessage(
-                    role = MessageRole.Assistant,
-                    text = "Hi — I'm KAI. Text chat is wired to the API stub. " +
-                        "Set KAI_API_BASE_URL when the backend is ready.",
-                )
-                SessionMessageStore.add(welcome)
-                list += welcome
-            } else {
-                list.addAll(existing)
-            }
-        }
-    }
+    val context = LocalContext.current
+    val processor = remember(context) { AssistantTurnProcessor(context) }
+    val messages by SessionMessageStore.messages.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<LocalMatch?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val api = remember { KaiApiClient() }
+
+    LaunchedEffect(Unit) {
+        if (SessionMessageStore.snapshot().isEmpty()) {
+            SessionMessageStore.add(
+                ChatMessage(
+                    role = MessageRole.Assistant,
+                    text = "Hi — I'm KAI. Local phone commands run on-device; " +
+                        "everything else goes to the backend chat API.",
+                ),
+            )
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
+    }
+
+    pending?.let { match ->
+        AlertDialog(
+            onDismissRequest = {
+                processor.cancelPendingConfirmation()
+                pending = null
+            },
+            title = { Text("Confirm action") },
+            text = { Text(match.confirmationPrompt) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val confirmed = match
+                        pending = null
+                        sending = true
+                        scope.launch {
+                            processor.confirmAndExecute(confirmed)
+                            sending = false
+                        }
+                    },
+                ) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        processor.cancelPendingConfirmation()
+                        pending = null
+                    },
+                ) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -136,36 +169,22 @@ fun TextChatScreen(
                     placeholder = { Text("Message KAI") },
                     maxLines = 4,
                     shape = RoundedCornerShape(18.dp),
+                    enabled = !sending && pending == null,
                 )
                 IconButton(
-                    enabled = draft.isNotBlank() && !sending,
+                    enabled = draft.isNotBlank() && !sending && pending == null,
                     onClick = {
                         val text = draft.trim()
                         if (text.isEmpty()) return@IconButton
                         draft = ""
-                        val userMessage = ChatMessage(role = MessageRole.User, text = text)
-                        SessionMessageStore.add(userMessage)
-                        messages += userMessage
                         sending = true
                         scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                api.sendChatStub(
-                                    sessionId = "local-session",
-                                    message = text,
-                                )
+                            when (val outcome = processor.handleUserText(text)) {
+                                is TurnOutcome.NeedsConfirmation -> pending = outcome.match
+                                is TurnOutcome.LocalReady,
+                                is TurnOutcome.CloudReady,
+                                -> Unit
                             }
-                            val reply = ChatMessage(
-                                id = UUID.randomUUID().toString(),
-                                role = MessageRole.Assistant,
-                                text = if (result.ok) {
-                                    result.reply
-                                } else {
-                                    // Friendly offline fallback for scaffold demos.
-                                    result.reply
-                                },
-                            )
-                            SessionMessageStore.add(reply)
-                            messages += reply
                             sending = false
                         }
                     },

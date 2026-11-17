@@ -132,12 +132,12 @@ fun SettingsScreen(
                 FilterChip(
                     selected = settings.voiceGender == VoiceGender.Female,
                     onClick = { scope.launch { settingsRepository.setVoiceGender(VoiceGender.Female) } },
-                    label = { Text("Female (placeholder)") },
+                    label = { Text("Female") },
                 )
                 FilterChip(
                     selected = settings.voiceGender == VoiceGender.Male,
                     onClick = { scope.launch { settingsRepository.setVoiceGender(VoiceGender.Male) } },
-                    label = { Text("Male (placeholder)") },
+                    label = { Text("Male") },
                 )
             }
             Text(
@@ -178,23 +178,30 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SectionTitle("Local tools (dev)")
+            SectionTitle("Local tools")
             Text(
-                text = "Safe demos for the local engine stubs.",
+                text = "On-device demos — also reachable by voice/text (\"battery\", \"flashlight on\", …).",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { tools.batteryStatus().toast(context) }) { Text("Battery") }
+                TextButton(onClick = { tools.dateTime().toast(context) }) { Text("Date/time") }
+                TextButton(onClick = { tools.connectivity().toast(context) }) { Text("Network") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { tools.openWifiSettings().toast(context) }) { Text("Wi‑Fi") }
+                TextButton(onClick = { tools.openBluetoothSettings().toast(context) }) { Text("Bluetooth") }
                 TextButton(onClick = { tools.flashlightOn().toast(context) }) { Text("Flash on") }
                 TextButton(onClick = { tools.flashlightOff().toast(context) }) { Text("Flash off") }
             }
-            TextButton(
-                onClick = {
-                    tools.startTimer(60, "KAI timer").toast(context)
-                },
-            ) { Text("1‑minute timer intent") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { tools.setVolume(50).toast(context) }) { Text("Vol 50%") }
+                TextButton(onClick = { tools.openCamera().toast(context) }) { Text("Camera") }
+                TextButton(onClick = { tools.startTimer(60, "KAI timer").toast(context) }) {
+                    Text("1‑min timer")
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Backend")
