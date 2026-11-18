@@ -25,7 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -114,7 +114,7 @@ fun VoiceSessionScreen(
                 },
                 actions = {
                     IconButton(onClick = onOpenChat) {
-                        Icon(Icons.Filled.Chat, contentDescription = "Text chat")
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Text chat")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

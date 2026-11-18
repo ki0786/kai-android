@@ -34,32 +34,34 @@ class TextToSpeechManager(
             val engine = tts
             val ok = status == TextToSpeech.SUCCESS && engine != null
             ready.set(ok)
-            if (ok && engine != null) {
-                applyVoicePreferences(engine)
-                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        mainHandler.post { onSpeakingChanged(true) }
-                    }
-
-                    override fun onDone(utteranceId: String?) {
-                        mainHandler.post { onSpeakingChanged(false) }
-                    }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        mainHandler.post { onSpeakingChanged(false) }
-                    }
-
-                    override fun onError(utteranceId: String?, errorCode: Int) {
-                        mainHandler.post { onSpeakingChanged(false) }
-                    }
-                })
-                pendingSpeak?.let { text ->
-                    pendingSpeak = null
-                    speakInternal(engine, text)
-                }
+            if (engine == null || !ok) {
+                mainHandler.post { onReady(false) }
+                return@TextToSpeech
             }
-            mainHandler.post { onReady(ok) }
+            applyVoicePreferences(engine)
+            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    mainHandler.post { onSpeakingChanged(true) }
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    mainHandler.post { onSpeakingChanged(false) }
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    mainHandler.post { onSpeakingChanged(false) }
+                }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    mainHandler.post { onSpeakingChanged(false) }
+                }
+            })
+            pendingSpeak?.let { text ->
+                pendingSpeak = null
+                speakInternal(engine, text)
+            }
+            mainHandler.post { onReady(true) }
         }
     }
 
