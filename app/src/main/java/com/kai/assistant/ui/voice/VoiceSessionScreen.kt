@@ -1,5 +1,9 @@
 package com.kai.assistant.ui.voice
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -15,13 +19,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,35 +40,67 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kai.assistant.ui.components.MicStatus
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kai.assistant.data.MessageRole
 import com.kai.assistant.ui.components.MicStatusChip
 import com.kai.assistant.ui.components.VoiceActivityIndicator
+import com.kai.assistant.voice.VoicePhase
+import com.kai.assistant.voice.VoiceSessionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceSessionScreen(
     onBack: () -> Unit,
     onOpenChat: () -> Unit,
+    viewModel: VoiceSessionViewModel = viewModel(),
 ) {
-    var holding by remember { mutableStateOf(false) }
-    var assistantSpeaking by remember { mutableStateOf(false) }
-    var lastHeard by remember { mutableStateOf("Hold the mic to talk. STT/TTS wiring comes next.") }
+    val ui by viewModel.uiState.collectAsStateWithLifecycle()
+    val micStatus by viewModel.micStatus.collectAsStateWithLifecycle()
+    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
-    val micStatus = when {
-        holding -> MicStatus.Listening
-        assistantSpeaking -> MicStatus.Processing
-        else -> MicStatus.Off
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            viewModel.onPushToTalkPressed()
+        }
+    }
+
+    fun ensureMicThen(start: () -> Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) start() else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    val holding = ui.phase == VoicePhase.Listening
+    val activeWave = ui.phase == VoicePhase.Listening || ui.phase == VoicePhase.Speaking
+
+    ui.pendingConfirmation?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelPending() },
+            title = { Text("Confirm action") },
+            text = { Text(pending.confirmationPrompt) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmPending() }) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelPending() }) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -75,7 +114,7 @@ fun VoiceSessionScreen(
                 },
                 actions = {
                     IconButton(onClick = onOpenChat) {
-                        Icon(Icons.Filled.Chat, contentDescription = "Text chat")
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Text chat")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -109,19 +148,19 @@ fun VoiceSessionScreen(
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(modifier = Modifier.weight(0.2f))
+            Spacer(modifier = Modifier.height(16.dp))
 
             VoiceActivityIndicator(
-                active = holding || assistantSpeaking,
+                active = activeWave,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(96.dp),
+                    .height(80.dp),
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = lastHeard,
+                text = ui.statusLine,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center,
@@ -132,19 +171,36 @@ fun VoiceSessionScreen(
                     .padding(16.dp),
             )
 
-            Spacer(modifier = Modifier.weight(0.35f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(messages.takeLast(8), key = { it.id }) { message ->
+                    val prefix = when (message.role) {
+                        MessageRole.User -> "You"
+                        MessageRole.Assistant -> "KAI"
+                        MessageRole.System -> "System"
+                    }
+                    Text(
+                        text = "$prefix: ${message.text}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             PushToTalkButton(
                 holding = holding,
+                enabled = ui.pendingConfirmation == null && ui.phase != VoicePhase.Processing,
                 onHoldChanged = { isHolding ->
-                    holding = isHolding
                     if (isHolding) {
-                        assistantSpeaking = false
-                        lastHeard = "Listening… (STT stub)"
+                        ensureMicThen { viewModel.onPushToTalkPressed() }
                     } else {
-                        // Simulate a short assistant turn after release.
-                        lastHeard = "You: (utterance captured locally — cloud STT TODO)"
-                        assistantSpeaking = true
+                        viewModel.onPushToTalkReleased()
                     }
                 },
             )
@@ -152,12 +208,8 @@ fun VoiceSessionScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             TextButton(
-                onClick = {
-                    // Interrupt stub — stops "speaking" without background capture.
-                    assistantSpeaking = false
-                    lastHeard = "Interrupted. Ready when you are."
-                },
-                enabled = assistantSpeaking,
+                onClick = { viewModel.interruptSpeech() },
+                enabled = ui.phase == VoicePhase.Speaking,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +220,7 @@ fun VoiceSessionScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
@@ -176,6 +228,7 @@ fun VoiceSessionScreen(
 @Composable
 private fun PushToTalkButton(
     holding: Boolean,
+    enabled: Boolean,
     onHoldChanged: (Boolean) -> Unit,
 ) {
     val scale by animateFloatAsState(
@@ -183,15 +236,15 @@ private fun PushToTalkButton(
         animationSpec = tween(140),
         label = "ptt-scale",
     )
-    val container = if (holding) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.primaryContainer
+    val container = when {
+        !enabled -> MaterialTheme.colorScheme.surfaceVariant
+        holding -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.primaryContainer
     }
-    val content = if (holding) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
+    val content = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+        holding -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -201,7 +254,8 @@ private fun PushToTalkButton(
                 .scale(scale)
                 .clip(CircleShape)
                 .background(container)
-                .pointerInput(Unit) {
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
                     detectTapGestures(
                         onPress = {
                             onHoldChanged(true)
