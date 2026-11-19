@@ -3,6 +3,8 @@
 
 # sdk.dir=/Users/YOU/Library/Android/sdk
 
-## Backend base URL for the KAI API (no trailing slash).
-## Defaults to http://10.0.2.2:8000 on emulator if unset.
-KAI_API_BASE_URL=http://10.0.2.2:8000
+## Optional build-time backend URL override (no trailing slash).
+## Prefer Settings → Backend URL at runtime on a physical phone.
+## Emulator runtime default (when this is unset): http://10.0.2.2:8000
+## Physical device runtime default: empty — set LAN IP in the app Settings.
+# KAI_API_BASE_URL=http://10.0.2.2:8000

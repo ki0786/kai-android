@@ -13,10 +13,12 @@ val localProperties = Properties().apply {
     }
 }
 
+// Build-time override only. Runtime defaults: emulator → 10.0.2.2:8000,
+// physical device → empty (configure in Settings). Never ship API keys here.
 val kaiApiBaseUrl: String =
     localProperties.getProperty("KAI_API_BASE_URL")
         ?: (project.findProperty("KAI_API_BASE_URL") as String?)
-        ?: "http://10.0.2.2:8000"
+        ?: ""
 
 android {
     namespace = "com.kai.assistant"

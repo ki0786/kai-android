@@ -1,6 +1,5 @@
 package com.kai.assistant.api
 
-import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,14 +13,19 @@ import java.util.concurrent.TimeUnit
 
 /**
  * HTTP client for the sibling FastAPI backend (`kai-backend`).
- * Base URL from BuildConfig / local.properties (`KAI_API_BASE_URL`).
+ * Base URL from Settings (persisted) with device-aware defaults via [BackendUrlResolver].
  * Provider API keys stay server-side — never embedded in this app.
  */
 class KaiApiClient(
-    baseUrl: String = BuildConfig.KAI_API_BASE_URL,
+    private val baseUrlProvider: () -> String,
     private val client: OkHttpClient = defaultClient(),
 ) {
-    private val root = baseUrl.trimEnd('/')
+    constructor(baseUrl: String, client: OkHttpClient = defaultClient()) : this(
+        baseUrlProvider = { baseUrl },
+        client = client,
+    )
+
+    private fun root(): String = baseUrlProvider().trim().trimEnd('/')
 
     data class HealthResult(
         val ok: Boolean,
@@ -38,8 +42,16 @@ class KaiApiClient(
     )
 
     fun health(): HealthResult {
+        val base = root()
+        if (base.isBlank()) {
+            return HealthResult(
+                ok = false,
+                body = BackendUrlResolver.offlineHint(""),
+                code = null,
+            )
+        }
         val request = Request.Builder()
-            .url("$root/health")
+            .url("$base/health")
             .get()
             .build()
         return runCatching {
@@ -56,12 +68,26 @@ class KaiApiClient(
      * POST /v1/chat with session transcript. Handles offline + 503 (no provider keys).
      */
     fun sendChat(sessionId: String, messages: List<ChatMessage>): ChatResult {
+        val base = root()
+        if (base.isBlank()) {
+            return ChatResult(
+                ok = false,
+                reply = "Backend URL is not set. " +
+                    "On a physical phone, open Settings → Backend URL and enter your PC's " +
+                    "LAN IP on the same Wi‑Fi (e.g. http://192.168.1.10:8000). " +
+                    "Do not use 10.0.2.2 — that only works on the Android emulator. " +
+                    "Local phone commands still work.",
+                code = null,
+                offline = true,
+            )
+        }
+
         val payload = JSONObject().apply {
             put("session_id", sessionId)
             put("messages", messages.toJsonArray())
         }
         val request = Request.Builder()
-            .url("$root/v1/chat")
+            .url("$base/v1/chat")
             .post(payload.toString().toRequestBody(JSON))
             .build()
 
@@ -98,8 +124,8 @@ class KaiApiClient(
         }.getOrElse { error ->
             ChatResult(
                 ok = false,
-                reply = "I'm offline right now — couldn't reach the backend " +
-                    "(${error.message ?: "network error"}). Local phone commands still work.",
+                reply = BackendUrlResolver.offlineHint(base) +
+                    " (${error.message ?: "network error"})",
                 code = null,
                 offline = true,
             )
@@ -113,7 +139,7 @@ class KaiApiClient(
             messages = listOf(ChatMessage(role = MessageRole.User, text = message)),
         )
 
-    fun baseUrl(): String = root
+    fun baseUrl(): String = root()
 
     private fun List<ChatMessage>.toJsonArray(): JSONArray {
         val array = JSONArray()

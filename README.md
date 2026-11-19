@@ -26,19 +26,23 @@ Android Studio normally writes `sdk.dir` for you. Keep that line.
 
 ## Set the backend URL
 
-Add or edit in `local.properties` (gitignored):
+**Preferred (runtime):** open the app → **Settings → Backend URL**, enter e.g. `http://192.168.1.10:8000`, tap **Save**, then **Test**.
+
+| Target | Typical URL |
+|--------|-------------|
+| Emulator → host machine | `http://10.0.2.2:8000` (automatic default on emulator) |
+| Physical device on LAN | `http://192.168.x.x:8000` (set in Settings — **never** `10.0.2.2`) |
+| Deployed backend | `https://your-api.example.com` |
+
+Optional build-time override in `local.properties` (gitignored):
 
 ```properties
 KAI_API_BASE_URL=http://10.0.2.2:8000
 ```
 
-| Target | Typical URL |
-|--------|-------------|
-| Emulator → host machine | `http://10.0.2.2:8000` |
-| Physical device on LAN | `http://192.168.x.x:8000` |
-| Deployed backend | `https://your-api.example.com` |
+Runtime resolution: Settings override → else BuildConfig if set → else emulator default `http://10.0.2.2:8000` **only on emulator**. On a physical phone with no Settings value, the URL stays empty and cloud chat tells you to configure Settings.
 
-The value is injected into `BuildConfig.KAI_API_BASE_URL` and used by `KaiApiClient`. Default if unset: `http://10.0.2.2:8000`.
+Bind `kai-backend` to `0.0.0.0:8000` (not only `127.0.0.1`) so the phone can reach it on the LAN.
 
 You do **not** need the backend for local phone commands (flashlight, battery, volume, settings intents, etc.). Cloud chat replies need `kai-backend` running with at least one provider key.
 
@@ -83,6 +87,7 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “volume up” / “set volume to 40”
 - “set a timer for 60 seconds” (confirms first)
 - “open Chrome” / “navigate to nearest coffee” (confirms first)
+- “open YouTube and play believer” (opens YouTube, then play/search)
 
 Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
 
