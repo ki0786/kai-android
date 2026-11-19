@@ -27,6 +27,7 @@ class LocalIntentRouter {
         matchReminderEdit(text)?.let { return it }
         matchReminder(text)?.let { return it }
         matchScreen(text)?.let { return it }
+        matchPhoto(text)?.let { return it }
         matchCalendar(utterance)?.let { return it }
         matchMemory(utterance)?.let { return it }
         matchMaps(text)?.let { return it }
@@ -242,6 +243,16 @@ class LocalIntentRouter {
             requiresConfirmation = true,
             confirmationPrompt = "Start a timer for ${describeDuration(seconds)}?",
             spokenLabel = "Starting a timer",
+        )
+    }
+
+    private fun matchPhoto(text: String): LocalMatch? {
+        val ask = parsePhotoAsk(text) ?: return null
+        return LocalMatch(
+            LocalCommand.DescribePhoto(useBackend = ask.useBackend),
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Describing a photo",
         )
     }
 

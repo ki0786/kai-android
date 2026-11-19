@@ -1,6 +1,7 @@
 package com.kai.assistant.voice
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kai.assistant.KaiApplication
@@ -74,6 +75,9 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     private val _screenshotConsent = MutableStateFlow(0L)
     val screenshotConsentRequest: StateFlow<Long> = _screenshotConsent.asStateFlow()
+
+    private val _photoPick = MutableStateFlow<Pair<Long, Boolean>?>(null)
+    val photoPickRequest: StateFlow<Pair<Long, Boolean>?> = _photoPick.asStateFlow()
 
     val messages = SessionMessageStore.messages
 
@@ -225,6 +229,20 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun onPhotoPicked(uri: Uri?) {
+        val request = _photoPick.value ?: return
+        _photoPick.value = null
+        viewModelScope.launch {
+            _ui.update { it.copy(phase = VoicePhase.Processing) }
+            val outcome = if (uri == null) {
+                TurnOutcome.LocalReady(processor.notePhotoCancelled())
+            } else {
+                processor.describePickedPhoto(uri, request.second)
+            }
+            present(outcome)
+        }
+    }
+
     fun onScreenshotConsentDenied() {
         present(TurnOutcome.LocalReady(processor.noteScreenshotDenied()))
     }
@@ -328,6 +346,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsPhoto -> {
+                _photoPick.value = System.nanoTime() to outcome.useBackend
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.NeedsScreenshotConsent -> {

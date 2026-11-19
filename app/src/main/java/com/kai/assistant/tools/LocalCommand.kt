@@ -47,6 +47,9 @@ sealed class LocalCommand {
         val newMeridiem: String?,
     ) : LocalCommand()
     data object DescribeScreen : LocalCommand()
+
+    /** [useBackend] is true only when the user asked to send the photo off the phone. */
+    data class DescribePhoto(val useBackend: Boolean) : LocalCommand()
     data class OpenMaps(val query: String) : LocalCommand()
     data object OpenCamera : LocalCommand()
 
@@ -129,6 +132,7 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.CancelReminder ||
         this is LocalCommand.ChangeReminder ||
         this is LocalCommand.DescribeScreen ||
+        this is LocalCommand.DescribePhoto ||
         this is LocalCommand.SaveMemory ||
         this is LocalCommand.DeleteMemory ||
         this is LocalCommand.EditMemory ||
