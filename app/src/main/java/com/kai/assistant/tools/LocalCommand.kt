@@ -12,6 +12,8 @@ sealed class LocalCommand {
     data object OpenBluetoothSettings : LocalCommand()
     data object OpenAppSettings : LocalCommand()
     data class LaunchAppByName(val appName: String) : LocalCommand()
+    /** Open an app, then trigger a play/search intent for [query] (e.g. a song). */
+    data class OpenAppAndPlay(val appName: String, val query: String) : LocalCommand()
     data class SetVolume(val percent: Int) : LocalCommand()
     data class AdjustVolume(val deltaSteps: Int) : LocalCommand()
     data class SetAlarm(val hour: Int, val minute: Int, val message: String) : LocalCommand()

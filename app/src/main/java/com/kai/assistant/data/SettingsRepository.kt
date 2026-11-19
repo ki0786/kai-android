@@ -8,8 +8,15 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import kotlinx.coroutines.flow.Flow
+import com.kai.assistant.api.BackendUrlResolver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "kai_settings")
 
@@ -21,46 +28,74 @@ data class KaiSettings(
     val speechRate: Float = 1.0f,
     val memoryEnabled: Boolean = true,
     val darkTheme: Boolean = false,
+    /** User override for kai-backend. Blank → device-aware default. */
+    val backendBaseUrl: String = "",
 )
 
-class SettingsRepository(private val context: Context) {
+class SettingsRepository(context: Context) {
+    private val appContext = context.applicationContext
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private object Keys {
         val language = stringPreferencesKey("language")
         val voiceGender = stringPreferencesKey("voice_gender")
         val speechRate = floatPreferencesKey("speech_rate")
         val memoryEnabled = booleanPreferencesKey("memory_enabled")
         val darkTheme = booleanPreferencesKey("dark_theme")
+        val backendBaseUrl = stringPreferencesKey("backend_base_url")
     }
 
-    val settings: Flow<KaiSettings> = context.dataStore.data.map { prefs ->
-        KaiSettings(
-            languageCode = prefs[Keys.language] ?: "en",
-            voiceGender = runCatching {
-                VoiceGender.valueOf(prefs[Keys.voiceGender] ?: VoiceGender.Female.name)
-            }.getOrDefault(VoiceGender.Female),
-            speechRate = prefs[Keys.speechRate] ?: 1.0f,
-            memoryEnabled = prefs[Keys.memoryEnabled] ?: true,
-            darkTheme = prefs[Keys.darkTheme] ?: false,
-        )
+    private val _settings = MutableStateFlow(KaiSettings())
+    val settings: StateFlow<KaiSettings> = _settings.asStateFlow()
+
+    init {
+        scope.launch {
+            appContext.dataStore.data
+                .map { prefs -> prefs.toKaiSettings() }
+                .collect { _settings.value = it }
+        }
     }
+
+    fun snapshot(): KaiSettings = _settings.value
+
+    /** Resolved URL for API calls (may be blank on physical devices until configured). */
+    fun effectiveBackendBaseUrl(): String =
+        BackendUrlResolver.resolve(snapshot().backendBaseUrl)
 
     suspend fun setLanguage(code: String) {
-        context.dataStore.edit { it[Keys.language] = code }
+        appContext.dataStore.edit { it[Keys.language] = code }
     }
 
     suspend fun setVoiceGender(gender: VoiceGender) {
-        context.dataStore.edit { it[Keys.voiceGender] = gender.name }
+        appContext.dataStore.edit { it[Keys.voiceGender] = gender.name }
     }
 
     suspend fun setSpeechRate(rate: Float) {
-        context.dataStore.edit { it[Keys.speechRate] = rate.coerceIn(0.5f, 2.0f) }
+        appContext.dataStore.edit { it[Keys.speechRate] = rate.coerceIn(0.5f, 2.0f) }
     }
 
     suspend fun setMemoryEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.memoryEnabled] = enabled }
+        appContext.dataStore.edit { it[Keys.memoryEnabled] = enabled }
     }
 
     suspend fun setDarkTheme(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.darkTheme] = enabled }
+        appContext.dataStore.edit { it[Keys.darkTheme] = enabled }
     }
+
+    suspend fun setBackendBaseUrl(url: String) {
+        val normalized = url.trim().trimEnd('/')
+        appContext.dataStore.edit { it[Keys.backendBaseUrl] = normalized }
+    }
+
+    private fun Preferences.toKaiSettings(): KaiSettings =
+        KaiSettings(
+            languageCode = this[Keys.language] ?: "en",
+            voiceGender = runCatching {
+                VoiceGender.valueOf(this[Keys.voiceGender] ?: VoiceGender.Female.name)
+            }.getOrDefault(VoiceGender.Female),
+            speechRate = this[Keys.speechRate] ?: 1.0f,
+            memoryEnabled = this[Keys.memoryEnabled] ?: true,
+            darkTheme = this[Keys.darkTheme] ?: false,
+            backendBaseUrl = this[Keys.backendBaseUrl].orEmpty(),
+        )
 }

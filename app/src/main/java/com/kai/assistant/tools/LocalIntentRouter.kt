@@ -24,6 +24,7 @@ class LocalIntentRouter {
         matchTimer(text)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
+        matchOpenAppAndPlay(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
     }
@@ -274,10 +275,36 @@ class LocalIntentRouter {
         }
     }
 
+    /**
+     * "open YouTube and play believer" → open app + play/search the track.
+     * Matched before [matchLaunchApp] so the whole phrase is not treated as an app name.
+     */
+    private fun matchOpenAppAndPlay(text: String): LocalMatch? {
+        val match = Regex(
+            """^(open|launch|start)\s+(the\s+)?(.+?)\s+and\s+(play|search(?:\s+for)?)\s+(.+)$""",
+        ).find(text) ?: return null
+        val appName = match.groupValues[3].trim()
+        val query = match.groupValues[5].trim()
+        if (appName.isBlank() || query.isBlank()) return null
+        val blocked = setOf(
+            "settings", "wifi", "wi-fi", "bluetooth", "camera", "maps",
+            "flashlight", "torch", "flash", "volume", "alarm", "timer",
+        )
+        if (appName in blocked) return null
+        return LocalMatch(
+            LocalCommand.OpenAppAndPlay(appName, query),
+            requiresConfirmation = true,
+            confirmationPrompt = "Open $appName and play \"$query\"?",
+            spokenLabel = "Opening $appName to play $query",
+        )
+    }
+
     private fun matchLaunchApp(text: String): LocalMatch? {
         val match = Regex("""^(open|launch|start)\s+(the\s+)?(.+?)(\s+app)?$""").find(text) ?: return null
         val name = match.groupValues[3].trim()
         if (name.isBlank()) return null
+        // Guard: compound "… and play …" must not become a bogus app label.
+        if (Regex("""\band\s+(play|search)\b""").containsMatchIn(name)) return null
         // Avoid stealing more specific intents already handled above.
         val blocked = setOf(
             "settings", "wifi", "wi-fi", "bluetooth", "camera", "maps",

@@ -1,5 +1,6 @@
 package com.kai.assistant.tools
 
+import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -12,6 +13,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
 import android.provider.AlarmClock
+import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
 import java.text.DateFormat
@@ -47,6 +49,7 @@ class LocalToolRouter(private val context: Context) {
         LocalCommand.OpenBluetoothSettings -> settings.openBluetooth()
         LocalCommand.OpenAppSettings -> settings.openAppDetails()
         is LocalCommand.LaunchAppByName -> launcher.launchByLabel(command.appName)
+        is LocalCommand.OpenAppAndPlay -> openAppAndPlay(command.appName, command.query)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
         is LocalCommand.SetAlarm -> alarms.setAlarm(command.hour, command.minute, command.message)
@@ -112,6 +115,81 @@ class LocalToolRouter(private val context: Context) {
                 else -> ToolResult.Unsupported("No camera app available.")
             }
         }.getOrElse { ToolResult.Error(it.message ?: "Could not open camera.") }
+    }
+
+    /**
+     * Launch [appName], then fire a play/search intent for [query]
+     * (e.g. "open YouTube and play believer").
+     */
+    fun openAppAndPlay(appName: String, query: String): ToolResult {
+        val packageName = launcher.resolveByLabel(appName)
+        val launchResult = if (packageName != null) {
+            launcher.launch(packageName)
+        } else {
+            launcher.launchByLabel(appName)
+        }
+        if (launchResult is ToolResult.Error || launchResult is ToolResult.Unsupported) {
+            return launchResult
+        }
+
+        val playResult = playQueryInApp(packageName, appName, query)
+        return when (playResult) {
+            is ToolResult.Ok -> ToolResult.Ok(
+                "Opened $appName and searching for \"$query\".",
+            )
+            else -> ToolResult.Ok(
+                "Opened $appName. Couldn't start playback for \"$query\" automatically — " +
+                    "search for it in the app.",
+            )
+        }
+    }
+
+    private fun playQueryInApp(
+        packageName: String?,
+        appName: String,
+        query: String,
+    ): ToolResult {
+        val pm = context.packageManager
+        val candidates = buildList {
+            add(
+                Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                    putExtra(SearchManager.QUERY, query)
+                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                    if (packageName != null) setPackage(packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            add(
+                Intent(Intent.ACTION_SEARCH).apply {
+                    putExtra(SearchManager.QUERY, query)
+                    putExtra("query", query)
+                    if (packageName != null) setPackage(packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            if (appName.contains("youtube", ignoreCase = true) ||
+                packageName == "com.google.android.youtube"
+            ) {
+                add(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(
+                            "https://www.youtube.com/results?search_query=${Uri.encode(query)}",
+                        ),
+                    ).apply {
+                        if (packageName != null) setPackage(packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    },
+                )
+            }
+        }
+
+        return runCatching {
+            val intent = candidates.firstOrNull { it.resolveActivity(pm) != null }
+                ?: return ToolResult.Unsupported("No play/search handler for $appName.")
+            context.startActivity(intent)
+            ToolResult.Ok("Playing \"$query\" in $appName.")
+        }.getOrElse { ToolResult.Error(it.message ?: "Play intent failed.") }
     }
 }
 

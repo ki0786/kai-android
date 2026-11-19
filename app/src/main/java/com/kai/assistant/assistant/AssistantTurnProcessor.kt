@@ -1,10 +1,12 @@
 package com.kai.assistant.assistant
 
 import android.content.Context
+import com.kai.assistant.KaiApplication
 import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.tools.LocalIntentRouter
 import com.kai.assistant.tools.LocalMatch
 import com.kai.assistant.tools.LocalToolRouter
@@ -23,10 +25,15 @@ sealed class TurnOutcome {
  */
 class AssistantTurnProcessor(
     context: Context,
-    private val api: KaiApiClient = KaiApiClient(),
+    private val settingsRepository: SettingsRepository =
+        (context.applicationContext as KaiApplication).settingsRepository,
     private val intentRouter: LocalIntentRouter = LocalIntentRouter(),
     private val tools: LocalToolRouter = LocalToolRouter(context.applicationContext),
 ) {
+    private val api = KaiApiClient(
+        baseUrlProvider = { settingsRepository.effectiveBackendBaseUrl() },
+    )
+
     fun ingestUserText(text: String): ChatMessage {
         val message = ChatMessage(role = MessageRole.User, text = text.trim())
         SessionMessageStore.add(message)

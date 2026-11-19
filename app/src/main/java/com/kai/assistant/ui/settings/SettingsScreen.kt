@@ -25,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -32,9 +33,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 // Required: capital-M Modifier class (not the modifier package).
 import androidx.compose.ui.Modifier
@@ -42,14 +46,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.kai.assistant.BuildConfig
+import com.kai.assistant.api.BackendUrlResolver
+import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
 import com.kai.assistant.tools.LocalToolRouter
 import com.kai.assistant.tools.toast
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.widget.Toast
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -206,27 +214,114 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Backend")
-            Text(
-                text = "API base: ${BuildConfig.KAI_API_BASE_URL}",
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Text(
-                text = "Keys never ship in the app — only this base URL. Override via local.properties.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(
-                onClick = {
-                    val intent = Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse(BuildConfig.KAI_API_BASE_URL),
-                    )
-                    runCatching { context.startActivity(intent) }
-                },
-            ) { Text("Open base URL") }
+            BackendUrlSection(settingsRepository = settingsRepository)
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun BackendUrlSection(settingsRepository: SettingsRepository) {
+    val settings by settingsRepository.settings.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val effective = remember(settings.backendBaseUrl) {
+        BackendUrlResolver.resolve(settings.backendBaseUrl)
+    }
+    var draft by remember { mutableStateOf(settings.backendBaseUrl) }
+    LaunchedEffect(settings.backendBaseUrl) {
+        draft = settings.backendBaseUrl
+    }
+    val emulator = remember { BackendUrlResolver.isEmulator() }
+    var testing by remember { mutableStateOf(false) }
+
+    Text(
+        text = if (emulator) {
+            "Running on emulator — default is ${BackendUrlResolver.EMULATOR_LOOPBACK} " +
+                "unless you override below."
+        } else {
+            "Physical device — set your PC's LAN IP below (same Wi‑Fi). " +
+                "Do not use 10.0.2.2 (emulator-only)."
+        },
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { draft = it },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        label = { Text("Backend URL") },
+        placeholder = {
+            Text(
+                if (emulator) {
+                    BackendUrlResolver.EMULATOR_LOOPBACK
+                } else {
+                    BackendUrlResolver.PHYSICAL_PLACEHOLDER
+                },
+            )
+        },
+        supportingText = {
+            Text(
+                if (effective.isBlank()) {
+                    "Not set — cloud chat will ask you to configure this."
+                } else {
+                    "Active: $effective"
+                },
+            )
+        },
+    )
+    Text(
+        text = "Example: http://192.168.1.10:8000 — keys stay on kai-backend, never in the app.",
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(
+            onClick = {
+                scope.launch {
+                    settingsRepository.setBackendBaseUrl(draft)
+                    Toast.makeText(context, "Backend URL saved", Toast.LENGTH_SHORT).show()
+                }
+            },
+        ) { Text("Save") }
+        TextButton(
+            onClick = {
+                scope.launch {
+                    settingsRepository.setBackendBaseUrl("")
+                    draft = ""
+                    Toast.makeText(context, "Cleared — using device default", Toast.LENGTH_SHORT)
+                        .show()
+                }
+            },
+        ) { Text("Use default") }
+        TextButton(
+            enabled = !testing && effective.isNotBlank(),
+            onClick = {
+                testing = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        KaiApiClient(effective).health()
+                    }
+                    testing = false
+                    val msg = if (result.ok) {
+                        "Backend reachable (${result.code})"
+                    } else {
+                        "Unreachable — use PC LAN IP on same Wi‑Fi, not 10.0.2.2. " +
+                            "(${result.body.take(80)})"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            },
+        ) { Text(if (testing) "Testing…" else "Test") }
+        TextButton(
+            enabled = effective.isNotBlank(),
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(effective))
+                runCatching { context.startActivity(intent) }
+            },
+        ) { Text("Open") }
     }
 }
 

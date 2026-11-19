@@ -55,6 +55,32 @@ class LocalIntentRouterTest {
     }
 
     @Test
+    fun openYoutubeAndPlayIsNotASingleAppName() {
+        val match = router.match("open YouTube and play believer")
+        assertNotNull(match)
+        assertTrue(match!!.requiresConfirmation)
+        assertEquals(
+            LocalCommand.OpenAppAndPlay(appName = "youtube", query = "believer"),
+            match.command,
+        )
+        assertTrue(match.confirmationPrompt.contains("believer"))
+    }
+
+    @Test
+    fun openAppAndPlayVariants() {
+        val play = router.match("open Spotify and play Shape of You")
+        assertEquals(
+            LocalCommand.OpenAppAndPlay("spotify", query = "shape of you"),
+            play!!.command,
+        )
+        val search = router.match("launch youtube and search for lo-fi beats")
+        assertEquals(
+            LocalCommand.OpenAppAndPlay("youtube", query = "lo-fi beats"),
+            search!!.command,
+        )
+    }
+
+    @Test
     fun unknownGoesToCloud() {
         assertNull(router.match("explain quantum entanglement simply"))
         assertNull(router.match("write a haiku about rain"))
