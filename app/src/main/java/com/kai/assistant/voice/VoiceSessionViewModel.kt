@@ -7,8 +7,8 @@ import com.kai.assistant.KaiApplication
 import com.kai.assistant.assistant.AssistantTurnProcessor
 import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.SessionMessageStore
-import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.staysOnDevice
 import com.kai.assistant.ui.components.MicStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,6 +54,9 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     private val _callPermission = MutableStateFlow<ContactsPermissionRequest?>(null)
     val callPermissionRequest: StateFlow<ContactsPermissionRequest?> =
         _callPermission.asStateFlow()
+
+    private val _accessibilitySettings = MutableStateFlow(0L)
+    val accessibilitySettingsRequest: StateFlow<Long> = _accessibilitySettings.asStateFlow()
 
     val messages = SessionMessageStore.messages
 
@@ -175,7 +178,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             val outcome = if (granted) {
                 processor.continueCall(request.match)
             } else {
-                TurnOutcome.LocalReady(processor.noteContactsPermissionDenied())
+                TurnOutcome.LocalReady(processor.noteContactsPermissionDenied(request.match.command))
             }
             present(outcome)
         }
@@ -189,7 +192,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             val outcome = if (granted) {
                 processor.continueAfterCallPermission(request.match)
             } else {
-                TurnOutcome.LocalReady(processor.noteCallPermissionDenied())
+                TurnOutcome.LocalReady(processor.noteCallPermissionDenied(request.match.command))
             }
             present(outcome)
         }
@@ -198,7 +201,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     fun cancelPending() {
         val pending = _ui.value.pendingConfirmation ?: return
         processor.cancelPendingConfirmation(
-            deviceOnly = pending.command is LocalCommand.CallContact,
+            deviceOnly = pending.command.staysOnDevice(),
         )
         _ui.update {
             it.copy(
@@ -260,6 +263,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsAccessibilitySettings -> {
+                _accessibilitySettings.value = System.nanoTime()
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)

@@ -27,6 +27,9 @@ sealed class ToolResult {
     data class NeedsConfirmation(val message: String) : ToolResult()
     data class Unsupported(val message: String) : ToolResult()
     data class Error(val message: String) : ToolResult()
+
+    /** Chat is already open. Ask once to turn on the WhatsApp send tap. */
+    data class OpenAccessibilitySettings(val message: String) : ToolResult()
 }
 
 class LocalToolRouter(private val context: Context) {
@@ -38,12 +41,19 @@ class LocalToolRouter(private val context: Context) {
     private val volume = VolumeTool(context)
     private val deviceInfo = DeviceInfoTool(context)
     private val calls = CallContactTool(context)
+    private val whatsApp = WhatsAppTool(context)
 
     fun contactsGranted(): Boolean = calls.hasContactsPermission()
 
     fun callGranted(): Boolean = calls.hasCallPermission()
 
     fun resolveCall(command: LocalCommand.CallContact): CallResolution = calls.resolve(command)
+
+    fun resolveWhatsApp(command: LocalCommand.SendWhatsApp): WhatsAppResolution =
+        whatsApp.resolve(command)
+
+    fun resolveWhatsAppCall(command: LocalCommand.WhatsAppCall): WhatsAppCallResolution =
+        whatsApp.resolveCall(command)
 
     fun execute(command: LocalCommand): ToolResult = when (command) {
         is LocalCommand.Flashlight -> flashlight.setEnabled(command.enabled)
@@ -61,6 +71,8 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.OpenMaps -> openMaps(command.query)
         LocalCommand.OpenCamera -> openCamera()
         is LocalCommand.CallContact -> calls.place(command)
+        is LocalCommand.SendWhatsApp -> whatsApp.open(command)
+        is LocalCommand.WhatsAppCall -> whatsApp.call(command)
     }
 
     fun flashlightOn(): ToolResult = flashlight.setEnabled(true)
@@ -316,6 +328,7 @@ fun ToolResult.messageText(): String = when (this) {
     is ToolResult.NeedsConfirmation -> message
     is ToolResult.Unsupported -> message
     is ToolResult.Error -> message
+    is ToolResult.OpenAccessibilitySettings -> message
 }
 
 fun ToolResult.toast(context: Context) {

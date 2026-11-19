@@ -124,6 +124,51 @@ class LocalIntentRouterTest {
     }
 
     @Test
+    fun whatsAppSendStaysLocalWithoutConfirming() {
+        val send = router.match("send hi to Mohammed Kaif on WhatsApp")
+        assertNotNull(send)
+        assertFalse(send!!.requiresConfirmation)
+        assertEquals(
+            LocalCommand.SendWhatsApp(
+                options = listOf(WhatsAppUtterance.Option("mohammed kaif", "hi")),
+            ),
+            send.command,
+        )
+        assertEquals("Sending hi to Mohammed Kaif on WhatsApp", send.spokenLabel)
+
+        val ordered = router.match("WhatsApp Mohammed Kaif hi")
+        assertFalse(ordered!!.requiresConfirmation)
+        val command = ordered.command as LocalCommand.SendWhatsApp
+        assertEquals("mohammed kaif", command.options.first().nameQuery)
+        assertEquals("hi", command.options.first().message)
+
+        assertEquals(LocalCommand.CallContact(query = "kaif"), router.match("call kaif")!!.command)
+        assertNull(router.match("send hi to mom"))
+    }
+
+    @Test
+    fun whatsAppVoiceAndVideoStayLocalWithoutConfirming() {
+        val voice = router.match("call Mohammed Kaif on WhatsApp")
+        assertNotNull(voice)
+        assertFalse(voice!!.requiresConfirmation)
+        assertEquals(
+            LocalCommand.WhatsAppCall(nameQuery = "mohammed kaif", video = false),
+            voice.command,
+        )
+        assertEquals("Calling Mohammed Kaif on WhatsApp", voice.spokenLabel)
+
+        val video = router.match("video call Mohammed Kaif on WhatsApp")
+        assertFalse(video!!.requiresConfirmation)
+        assertEquals(
+            LocalCommand.WhatsAppCall(nameQuery = "mohammed kaif", video = true),
+            video.command,
+        )
+
+        assertEquals(LocalCommand.CallContact(query = "kaif"), router.match("call kaif")!!.command)
+        assertEquals(LocalCommand.CallContact(query = "mom"), router.match("phone mom")!!.command)
+    }
+
+    @Test
     fun couldYouCallStillMatchesLocally() {
         val match = router.match("could you phone mom")
         assertNotNull(match)

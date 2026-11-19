@@ -24,6 +24,7 @@ class LocalIntentRouter {
         matchTimer(text)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
+        matchWhatsApp(text)?.let { return it }
         matchCall(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
@@ -305,6 +306,31 @@ class LocalIntentRouter {
         "yes", "yeah", "yep", "yup", "ok", "okay", "confirm", "confirmed",
         "number", "people", "person", "time", "times", "about",
     )
+
+    private fun matchWhatsApp(text: String): LocalMatch? {
+        WhatsAppUtterance.parseCall(text)?.let { call ->
+            val label = ContactMatcher.displayQuery(call.nameQuery)
+            val spoken = if (call.video) {
+                "Video calling $label on WhatsApp"
+            } else {
+                "Calling $label on WhatsApp"
+            }
+            return LocalMatch(
+                command = LocalCommand.WhatsAppCall(nameQuery = call.nameQuery, video = call.video),
+                requiresConfirmation = false,
+                confirmationPrompt = "",
+                spokenLabel = spoken,
+            )
+        }
+        val parsed = WhatsAppUtterance.parse(text) ?: return null
+        val label = ContactMatcher.displayQuery(parsed.nameQuery)
+        return LocalMatch(
+            command = LocalCommand.SendWhatsApp(options = parsed.options),
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Sending ${parsed.message} to $label on WhatsApp",
+        )
+    }
 
     private fun matchCall(text: String): LocalMatch? {
         val cleaned = text.replace(",", " ").replace(Regex("\\s+"), " ").trim()

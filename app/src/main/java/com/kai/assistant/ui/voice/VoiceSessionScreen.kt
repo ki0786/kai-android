@@ -55,6 +55,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kai.assistant.data.MessageRole
+import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.ui.components.MicStatusChip
 import com.kai.assistant.ui.components.VoiceActivityIndicator
 import com.kai.assistant.voice.VoicePhase
@@ -72,6 +73,7 @@ fun VoiceSessionScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val contactsRequest by viewModel.contactsPermissionRequest.collectAsStateWithLifecycle()
     val callRequest by viewModel.callPermissionRequest.collectAsStateWithLifecycle()
+    val accessRequest by viewModel.accessibilitySettingsRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -103,6 +105,12 @@ fun VoiceSessionScreen(
     LaunchedEffect(callRequest?.token) {
         if (callRequest != null) {
             callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
+
+    LaunchedEffect(accessRequest) {
+        if (accessRequest != 0L) {
+            runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
         }
     }
 
