@@ -96,7 +96,9 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “remind me to call the supplier at 7” (notification stored on this phone; KAI speaks it when it fires)
 - “what’s on my screen” (reads visible text and controls on the phone; says so if accessibility is off)
 
-Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
+Current facts, news, and “search the web for …” go to `POST /v1/research` after local commands. The reply shows the backend answer and only the source links it returned. If the backend is offline, KAI says so and does not invent sources.
+
+Anything else that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
 
 ## What’s in this slice
 

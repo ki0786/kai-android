@@ -3,6 +3,7 @@ package com.kai.assistant.api
 import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
+import com.kai.assistant.tools.ResearchSource
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,6 +28,14 @@ class KaiApiClient(
         val ok: Boolean,
         val body: String,
         val code: Int?,
+    )
+
+    data class ResearchResult(
+        val ok: Boolean,
+        val answer: String,
+        val sources: List<ResearchSource>,
+        val code: Int?,
+        val offline: Boolean = false,
     )
 
     data class ChatResult(
@@ -106,6 +115,51 @@ class KaiApiClient(
         }
     }
 
+    /**
+     * POST /v1/research. Sources are only those the backend returns.
+     */
+    fun research(query: String): ResearchResult {
+        val payload = JSONObject().put("query", query)
+        val request = Request.Builder()
+            .url("$root/v1/research")
+            .post(payload.toString().toRequestBody(JSON))
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@use ResearchResult(
+                        ok = false,
+                        answer = "",
+                        sources = emptyList(),
+                        code = response.code,
+                    )
+                }
+                val parsed = runCatching { JSONObject(body) }.getOrNull()
+                    ?: return@use ResearchResult(
+                        ok = false,
+                        answer = "",
+                        sources = emptyList(),
+                        code = response.code,
+                    )
+                ResearchResult(
+                    ok = true,
+                    answer = parsed.optString("answer"),
+                    sources = parseSources(parsed.optJSONArray("sources")),
+                    code = response.code,
+                )
+            }
+        }.getOrElse {
+            ResearchResult(
+                ok = false,
+                answer = "",
+                sources = emptyList(),
+                code = null,
+                offline = true,
+            )
+        }
+    }
+
     /** @deprecated Prefer [sendChat] with full transcript. */
     fun sendChatStub(sessionId: String, message: String): ChatResult =
         sendChat(
@@ -130,6 +184,19 @@ class KaiApiClient(
             )
         }
         return array
+    }
+
+    private fun parseSources(array: JSONArray?): List<ResearchSource> {
+        if (array == null) return emptyList()
+        val sources = mutableListOf<ResearchSource>()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val url = item.optString("url").trim()
+            if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+            val title = item.optString("title").trim()
+            sources += ResearchSource(title = title, url = url)
+        }
+        return sources
     }
 
     private fun friendly503(body: String): String {
