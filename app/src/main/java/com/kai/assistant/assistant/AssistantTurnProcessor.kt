@@ -5,6 +5,7 @@ import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.CallResolution
 import com.kai.assistant.tools.ContactMatcher
@@ -20,6 +21,7 @@ import com.kai.assistant.tools.needsNotification
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 sealed class TurnOutcome {
@@ -58,7 +60,9 @@ class AssistantTurnProcessor(
     private val api: KaiApiClient = KaiApiClient(),
     private val intentRouter: LocalIntentRouter = LocalIntentRouter(),
     private val tools: LocalToolRouter = LocalToolRouter(context.applicationContext),
+    private val settingsRepository: SettingsRepository = SettingsRepository(context.applicationContext),
 ) {
+    private val memory get() = tools.memoryStore()
     fun ingestUserText(text: String, deviceOnly: Boolean = false): ChatMessage {
         val message = ChatMessage(
             role = MessageRole.User,
@@ -74,9 +78,22 @@ class AssistantTurnProcessor(
         if (trimmed.isEmpty()) {
             return TurnOutcome.LocalReady("I didn't catch that. Try again.")
         }
+        refreshMemoryGate()
         val match = intentRouter.match(trimmed)
         val onDevice = match?.command?.staysOnDevice() == true
         ingestUserText(trimmed, deviceOnly = onDevice)
+        return try {
+            dispatch(match)
+        } finally {
+            memory.recordTurn(
+                role = "user",
+                text = trimmed,
+                allowSecret = match?.command is LocalCommand.SaveMemory,
+            )
+        }
+    }
+
+    private suspend fun dispatch(match: LocalMatch?): TurnOutcome {
         if (match != null) {
             // Calls and WhatsApp are resolved on the device. No match, several
             // matches, and permission prompts never fall through to the backend.
@@ -97,13 +114,17 @@ class AssistantTurnProcessor(
         return callCloud()
     }
 
-    suspend fun confirmAndExecute(match: LocalMatch): TurnOutcome = executeLocal(match)
+    suspend fun confirmAndExecute(match: LocalMatch): TurnOutcome {
+        refreshMemoryGate()
+        return executeLocal(match)
+    }
 
     /**
      * Continues a call after the contacts permission dialog.
      * Does not add the user utterance again and does not call the backend.
      */
     suspend fun continueCall(match: LocalMatch): TurnOutcome {
+        refreshMemoryGate()
         return when (val command = match.command) {
             is LocalCommand.SendWhatsApp -> {
                 if (!tools.contactsGranted()) {
@@ -131,6 +152,7 @@ class AssistantTurnProcessor(
      * Continues after the phone-call permission dialog and starts the call immediately.
      */
     suspend fun continueAfterCallPermission(match: LocalMatch): TurnOutcome {
+        refreshMemoryGate()
         if (!tools.callGranted()) {
             return TurnOutcome.LocalReady(noteCallPermissionDenied(match.command))
         }
@@ -142,6 +164,7 @@ class AssistantTurnProcessor(
     }
 
     suspend fun continueAfterNotificationPermission(match: LocalMatch): TurnOutcome {
+        refreshMemoryGate()
         if (!tools.notificationsGranted()) {
             return TurnOutcome.LocalReady(noteNotificationDenied())
         }
@@ -406,6 +429,11 @@ class AssistantTurnProcessor(
         SessionMessageStore.add(
             ChatMessage(role = MessageRole.Assistant, text = text, deviceOnly = deviceOnly),
         )
+        memory.recordTurn(role = "assistant", text = text, allowSecret = false)
+    }
+
+    private suspend fun refreshMemoryGate() {
+        memory.writesEnabled = settingsRepository.settings.first().memoryEnabled
     }
 
     private fun rememberReady(text: String, deviceOnly: Boolean): TurnOutcome {
@@ -424,6 +452,7 @@ class AssistantTurnProcessor(
         }
         val reply = result.reply
         SessionMessageStore.add(ChatMessage(role = MessageRole.Assistant, text = reply))
+        memory.recordTurn(role = "assistant", text = reply, allowSecret = false)
         return TurnOutcome.CloudReady(reply = reply, offline = result.offline || result.code == 503)
     }
 }

@@ -77,6 +77,17 @@ sealed class LocalCommand {
             get() = options.firstOrNull()?.nameQuery.orEmpty()
     }
 
+    data class SaveMemory(val text: String, val project: Boolean) : LocalCommand()
+
+    data class DeleteMemory(val query: String, val all: Boolean = false) : LocalCommand()
+
+    data class EditMemory(val query: String, val text: String) : LocalCommand()
+
+    data class RecallMemory(
+        val mode: RecallMode,
+        val query: String = "",
+    ) : LocalCommand()
+
     /**
      * Start a WhatsApp voice or video call to one on-device contact.
      * [video] is false for a voice call.
@@ -101,7 +112,11 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.SetReminders ||
         this is LocalCommand.CancelReminder ||
         this is LocalCommand.ChangeReminder ||
-        this is LocalCommand.DescribeScreen
+        this is LocalCommand.DescribeScreen ||
+        this is LocalCommand.SaveMemory ||
+        this is LocalCommand.DeleteMemory ||
+        this is LocalCommand.EditMemory ||
+        this is LocalCommand.RecallMemory
 
 fun LocalCommand.needsNotification(): Boolean =
     this is LocalCommand.StartTimer ||

@@ -51,6 +51,7 @@ class LocalToolRouter(private val context: Context) {
     private val deviceInfo = DeviceInfoTool(context)
     private val calls = CallContactTool(context)
     private val whatsApp = WhatsAppTool(context)
+    private val memory = PersonalMemoryStore(context)
 
     fun contactsGranted(): Boolean = calls.hasContactsPermission()
 
@@ -107,6 +108,43 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.CallContact -> calls.place(command)
         is LocalCommand.SendWhatsApp -> whatsApp.open(command)
         is LocalCommand.WhatsAppCall -> whatsApp.call(command)
+        is LocalCommand.SaveMemory -> saveMemory(command)
+        is LocalCommand.DeleteMemory -> deleteMemory(command)
+        is LocalCommand.EditMemory -> editMemory(command)
+        is LocalCommand.RecallMemory -> recallMemory(command)
+    }
+
+    fun memoryStore(): PersonalMemoryStore = memory
+
+    private fun saveMemory(command: LocalCommand.SaveMemory): ToolResult {
+        if (!memory.writesEnabled) return ToolResult.Ok(formatMemoryOffReply())
+        val kind = if (command.project) MemoryKind.Project else MemoryKind.Fact
+        memory.save(command.text, kind) ?: return ToolResult.Ok(formatMemoryOffReply())
+        return ToolResult.Ok(formatRememberReply(command.text, command.project))
+    }
+
+    private fun deleteMemory(command: LocalCommand.DeleteMemory): ToolResult {
+        if (command.all) {
+            val count = memory.deleteAll()
+            return ToolResult.Ok(formatDeleteReply(command.query, removed = null, all = true, count = count))
+        }
+        val removed = memory.deleteMatching(command.query)
+        return ToolResult.Ok(formatDeleteReply(command.query, removed, all = false, count = if (removed == null) 0 else 1))
+    }
+
+    private fun editMemory(command: LocalCommand.EditMemory): ToolResult {
+        val updated = memory.editMatching(command.query, command.text)
+        return ToolResult.Ok(formatEditReply(command.query, updated))
+    }
+
+    private fun recallMemory(command: LocalCommand.RecallMemory): ToolResult {
+        val reply = when (command.mode) {
+            RecallMode.List -> formatListReply(memory.all())
+            RecallMode.Projects -> formatProjectsReply(memory.all())
+            RecallMode.Recent -> formatRecentReply(memory.recentTurns())
+            RecallMode.Search -> formatSearchReply(command.query, memory.all(), memory.recentTurns())
+        }
+        return ToolResult.Ok(reply)
     }
 
     private fun takeScreenshot(): ToolResult {
