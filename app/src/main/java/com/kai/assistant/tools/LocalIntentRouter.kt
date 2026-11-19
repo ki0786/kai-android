@@ -24,6 +24,7 @@ class LocalIntentRouter {
         matchTimer(text)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
+        matchCall(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
     }
@@ -273,6 +274,186 @@ class LocalIntentRouter {
             null
         }
     }
+
+    private val confirmationPrefix = Regex(
+        """^(yes|yeah|yep|yup|confirmed|confirm|okay|ok|go ahead and|go ahead)\s+""",
+    )
+    private val politePrefix = Regex(
+        """^(please|can you|could you|would you|will you)\s+""",
+    )
+    private val trailingConfirmation = Regex(
+        """\s+(confirmed|confirm|okay|ok|yes|yeah|yep|yup|please|now)$""",
+    )
+    private val callVerb = Regex(
+        """^(?:(?:make|place)\s+a\s+)?(?:phone\s+call|call|phone|dial)(?:\s+to)?(?:\s+the)?\s+(\S(?:.*\S)?)$""",
+    )
+    private val giveCall = Regex(
+        """^give\s+(.+?)\s+a\s+(?:phone\s+)?call$""",
+    )
+    private val typedSuffix = Regex(
+        """^(.*\S)\s+(?:on|at)(?:\s+(?:his|her|their))?\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)$""",
+    )
+    private val bareTypeSuffix = Regex(
+        """^(.*\S)\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)$""",
+    )
+    private val nameWord = Regex("""^\p{L}[\p{L}.'’\-]*$""")
+    private val notAName = setOf(
+        "me", "you", "him", "her", "them", "us", "it", "someone", "somebody",
+        "anyone", "everybody", "back", "later", "tomorrow", "today", "tonight",
+        "yesterday", "off", "out", "soon", "again", "settings", "help", "a", "an",
+        "the", "my", "your", "our", "day", "quits", "up", "down", "now", "please",
+        "yes", "yeah", "yep", "yup", "ok", "okay", "confirm", "confirmed",
+        "number", "people", "person", "time", "times", "about",
+    )
+
+    private fun matchCall(text: String): LocalMatch? {
+        val cleaned = text.replace(",", " ").replace(Regex("\\s+"), " ").trim()
+        var rest = cleaned
+        while (true) {
+            val before = rest
+            confirmationPrefix.find(rest)?.let { prefix ->
+                rest = rest.substring(prefix.value.length).trim()
+            }
+            politePrefix.find(rest)?.let { polite ->
+                rest = rest.substring(polite.value.length).trim()
+            }
+            if (rest == before) break
+        }
+
+        val stripped = stripTrailingConfirmation(rest)
+        val target = extractCallTarget(stripped.target) ?: return null
+        val parsed = parseCallTarget(target) ?: return null
+        val command = parsed.command
+        val label = command.resolvedName ?: ContactMatcher.displayQuery(
+            if (command.rawNumber) command.resolvedName ?: command.query else command.query,
+        )
+        // A single match places the call immediately. No confirm dialog.
+        return LocalMatch(
+            command = command,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Calling $label",
+        )
+    }
+
+    private fun extractCallTarget(text: String): String? {
+        callVerb.find(text)?.let { return it.groupValues[1].trim() }
+        giveCall.find(text)?.let { return it.groupValues[1].trim() }
+        return null
+    }
+
+    private fun parseCallTarget(rawTarget: String): ParsedCall? {
+        val stripped = stripTrailingConfirmation(rawTarget)
+        var target = stripped.target
+        if (target.isBlank()) return null
+
+        var phoneType: PhoneKind? = null
+        typedSuffix.find(target)?.let { match ->
+            phoneType = phoneKind(match.groupValues[2])
+            target = match.groupValues[1].trim()
+        }
+        if (phoneType == null) {
+            bareTypeSuffix.find(target)?.let { match ->
+                val kind = phoneKind(match.groupValues[2])
+                val name = match.groupValues[1].trim()
+                if (kind != null && looksLikeContactName(name)) {
+                    phoneType = kind
+                    target = name
+                }
+            }
+        }
+        if (target.isBlank()) return null
+
+        if (looksLikePhoneNumber(target)) {
+            return ParsedCall(
+                LocalCommand.CallContact(
+                    query = target,
+                    phoneType = phoneType,
+                    rawNumber = true,
+                    resolvedNumber = target,
+                ),
+                confirmed = stripped.confirmed,
+            )
+        }
+
+        splitNameAndNumber(target)?.let { (name, number) ->
+            return ParsedCall(
+                LocalCommand.CallContact(
+                    query = number,
+                    phoneType = phoneType,
+                    rawNumber = true,
+                    resolvedNumber = number,
+                    resolvedName = ContactMatcher.displayQuery(name),
+                ),
+                confirmed = stripped.confirmed,
+            )
+        }
+
+        if (!looksLikeContactName(target)) return null
+        return ParsedCall(
+            LocalCommand.CallContact(query = target, phoneType = phoneType),
+            confirmed = stripped.confirmed,
+        )
+    }
+
+    private fun stripTrailingConfirmation(rawTarget: String): StrippedTarget {
+        var target = rawTarget.trim()
+        var confirmed = false
+        if (target.endsWith(" right now")) {
+            target = target.removeSuffix(" right now").trim()
+        }
+        while (true) {
+            val suffix = trailingConfirmation.find(target) ?: break
+            val word = suffix.groupValues[1]
+            if (word != "please" && word != "now") confirmed = true
+            target = target.substring(0, suffix.range.first).trim()
+        }
+        return StrippedTarget(target, confirmed)
+    }
+
+    private fun splitNameAndNumber(target: String): Pair<String, String>? {
+        val tokens = target.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size < 2) return null
+        for (index in 1 until tokens.size) {
+            val name = tokens.take(index).joinToString(" ")
+            val number = tokens.drop(index).joinToString(" ")
+            if (looksLikeContactName(name) && looksLikePhoneNumber(number)) {
+                return name to number
+            }
+        }
+        return null
+    }
+
+    private fun looksLikePhoneNumber(target: String): Boolean {
+        val digits = target.count { it.isDigit() }
+        if (digits !in 3..15) return false
+        return target.all { it.isDigit() || it in "+-(). " }
+    }
+
+    private fun looksLikeContactName(target: String): Boolean {
+        val parts = target.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (parts.isEmpty() || parts.size > 4) return false
+        if (!parts.all { nameWord.matches(it) }) return false
+        if (parts.any { it in notAName }) return false
+        return true
+    }
+
+    private fun phoneKind(word: String): PhoneKind? = when (word) {
+        "mobile", "cell", "cellphone", "cell phone" -> PhoneKind.Mobile
+        "home" -> PhoneKind.Home
+        "work", "office" -> PhoneKind.Work
+        else -> null
+    }
+
+    private data class ParsedCall(
+        val command: LocalCommand.CallContact,
+        val confirmed: Boolean,
+    )
+
+    private data class StrippedTarget(
+        val target: String,
+        val confirmed: Boolean,
+    )
 
     private fun matchLaunchApp(text: String): LocalMatch? {
         val match = Regex("""^(open|launch|start)\s+(the\s+)?(.+?)(\s+app)?$""").find(text) ?: return null

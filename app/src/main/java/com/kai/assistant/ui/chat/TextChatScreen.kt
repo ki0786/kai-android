@@ -1,5 +1,8 @@
 package com.kai.assistant.ui.chat
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +54,7 @@ import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalMatch
 import kotlinx.coroutines.launch
 
@@ -66,15 +70,78 @@ fun TextChatScreen(
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<LocalMatch?>(null) }
+    var contactsRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
+    var callRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    fun applyCallOutcome(outcome: TurnOutcome?) {
+        when (outcome) {
+            is TurnOutcome.NeedsConfirmation -> pending = outcome.match
+            is TurnOutcome.NeedsContactsPermission -> {
+                contactsRequest = System.nanoTime() to outcome.pending
+            }
+            is TurnOutcome.NeedsCallPermission -> {
+                callRequest = System.nanoTime() to outcome.pending
+            }
+            else -> Unit
+        }
+    }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val match = contactsRequest?.second ?: return@rememberLauncherForActivityResult
+        contactsRequest = null
+        sending = true
+        scope.launch {
+            val outcome = if (granted) {
+                processor.continueCall(match)
+            } else {
+                processor.noteContactsPermissionDenied()
+                null
+            }
+            applyCallOutcome(outcome)
+            sending = false
+        }
+    }
+
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val match = callRequest?.second ?: return@rememberLauncherForActivityResult
+        callRequest = null
+        sending = true
+        scope.launch {
+            val outcome = if (granted) {
+                processor.continueAfterCallPermission(match)
+            } else {
+                processor.noteCallPermissionDenied()
+                null
+            }
+            applyCallOutcome(outcome)
+            sending = false
+        }
+    }
+
+    LaunchedEffect(contactsRequest?.first) {
+        if (contactsRequest != null) {
+            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
+
+    LaunchedEffect(callRequest?.first) {
+        if (callRequest != null) {
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (SessionMessageStore.snapshot().isEmpty()) {
             SessionMessageStore.add(
                 ChatMessage(
                     role = MessageRole.Assistant,
-                    text = "Hi — I'm KAI. Local phone commands run on-device; " +
+                    text = "Hi — I'm KAI. Local phone commands, including calls, run on-device; " +
                         "everything else goes to the backend chat API.",
                 ),
             )
@@ -90,7 +157,7 @@ fun TextChatScreen(
     pending?.let { match ->
         AlertDialog(
             onDismissRequest = {
-                processor.cancelPendingConfirmation()
+                processor.cancelPendingConfirmation(deviceOnly = match.command is LocalCommand.CallContact)
                 pending = null
             },
             title = { Text("Confirm action") },
@@ -111,7 +178,9 @@ fun TextChatScreen(
             dismissButton = {
                 TextButton(
                     onClick = {
-                        processor.cancelPendingConfirmation()
+                        processor.cancelPendingConfirmation(
+                            deviceOnly = match.command is LocalCommand.CallContact,
+                        )
                         pending = null
                     },
                 ) { Text("Cancel") }
@@ -180,12 +249,7 @@ fun TextChatScreen(
                         draft = ""
                         sending = true
                         scope.launch {
-                            when (val outcome = processor.handleUserText(text)) {
-                                is TurnOutcome.NeedsConfirmation -> pending = outcome.match
-                                is TurnOutcome.LocalReady,
-                                is TurnOutcome.CloudReady,
-                                -> Unit
-                            }
+                            applyCallOutcome(processor.handleUserText(text))
                             sending = false
                         }
                     },

@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 // Required: capital-M Modifier class (not the modifier package).
@@ -69,6 +70,8 @@ fun VoiceSessionScreen(
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
     val micStatus by viewModel.micStatus.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val contactsRequest by viewModel.contactsPermissionRequest.collectAsStateWithLifecycle()
+    val callRequest by viewModel.callPermissionRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -76,6 +79,30 @@ fun VoiceSessionScreen(
     ) { granted ->
         if (granted) {
             viewModel.onPushToTalkPressed()
+        }
+    }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onContactsPermissionResult(granted)
+    }
+
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onCallPermissionResult(granted)
+    }
+
+    LaunchedEffect(contactsRequest?.token) {
+        if (contactsRequest != null) {
+            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
+
+    LaunchedEffect(callRequest?.token) {
+        if (callRequest != null) {
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
         }
     }
 

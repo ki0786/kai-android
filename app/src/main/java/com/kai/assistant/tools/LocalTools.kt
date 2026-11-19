@@ -37,6 +37,13 @@ class LocalToolRouter(private val context: Context) {
     private val settings = OpenSettingsTool(context)
     private val volume = VolumeTool(context)
     private val deviceInfo = DeviceInfoTool(context)
+    private val calls = CallContactTool(context)
+
+    fun contactsGranted(): Boolean = calls.hasContactsPermission()
+
+    fun callGranted(): Boolean = calls.hasCallPermission()
+
+    fun resolveCall(command: LocalCommand.CallContact): CallResolution = calls.resolve(command)
 
     fun execute(command: LocalCommand): ToolResult = when (command) {
         is LocalCommand.Flashlight -> flashlight.setEnabled(command.enabled)
@@ -53,6 +60,7 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.StartTimer -> alarms.startTimer(command.seconds, command.message)
         is LocalCommand.OpenMaps -> openMaps(command.query)
         LocalCommand.OpenCamera -> openCamera()
+        is LocalCommand.CallContact -> calls.place(command)
     }
 
     fun flashlightOn(): ToolResult = flashlight.setEnabled(true)
