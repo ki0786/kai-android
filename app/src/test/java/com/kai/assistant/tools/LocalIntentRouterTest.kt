@@ -55,6 +55,14 @@ class LocalIntentRouterTest {
     }
 
     @Test
+    fun youtubeStaysALocalAppCommand() {
+        val match = router.match("open youtube")
+        assertNotNull(match)
+        assertTrue(match!!.requiresConfirmation)
+        assertEquals(LocalCommand.LaunchAppByName("youtube"), match.command)
+    }
+
+    @Test
     fun unknownGoesToCloud() {
         assertNull(router.match("explain quantum entanglement simply"))
         assertNull(router.match("write a haiku about rain"))

@@ -40,7 +40,7 @@ KAI_API_BASE_URL=http://10.0.2.2:8000
 
 The value is injected into `BuildConfig.KAI_API_BASE_URL` and used by `KaiApiClient`. Default if unset: `http://10.0.2.2:8000`.
 
-You do **not** need the backend for local phone commands (flashlight, battery, volume, settings intents, etc.). Cloud chat replies need `kai-backend` running with at least one provider key.
+You do **not** need the backend for local phone commands (flashlight, battery, volume, settings intents, YouTube and other apps, etc.). General questions are answered on the phone when the on-device model is ready. The backend is the fallback when that model is missing, still loading, or errors — and when you turn **Answer on this phone** off. Provider API keys stay on `kai-backend` only.
 
 ## Permissions
 
@@ -84,7 +84,38 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “set a timer for 60 seconds” (confirms first)
 - “open Chrome” / “navigate to nearest coffee” (confirms first)
 
-Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
+Anything that does not match a local command tries the on-device model first. If that model cannot answer, the turn goes to `POST /v1/chat` and the reply starts with “This reply used the backend.” Phone-command turns are left out of that request. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
+
+## On-device answers
+
+Settings → **Answer on this phone** (on by default).
+
+| | |
+|---|---|
+| Engine | Google AI Edge MediaPipe LLM Inference (`tasks-genai`) |
+| Model | Qwen2.5 0.5B Instruct, int8, MediaPipe `.task` |
+| Download | 547 MB (`546,660,344` bytes), first use only, into app storage |
+| Status | Home, chat, voice, and Settings show downloading / loading / ready / failed |
+
+Gemma 3 1B int4 is a similar size, but the LiteRT Gemma repo on Hugging Face is gated and would need a token in the app. KAI does not embed API keys, so it downloads the public Qwen2.5 0.5B MediaPipe build instead. CPU inference, so it runs on a mid-range vivo without a desktop-class GPU.
+
+First question while the file is still downloading uses the backend and says so. The next question after status **ready** stays on the phone.
+
+### Try it on a vivo
+
+1. Phone and computer on the same Wi‑Fi. In `local.properties` set `KAI_API_BASE_URL=http://<computer-lan-ip>:8000` (the backend is only the fallback).
+2. Enable USB debugging on the vivo and install:
+
+```bash
+./gradlew :app:installDebug
+adb shell am start -n com.kai.assistant/.MainActivity
+```
+
+3. Open **Settings**. On-device answers should already be on. Tap **Download model**, or just ask a question — that starts the download. Stay on Wi‑Fi; the file is about 547 MB. Free a bit more than that on the phone.
+4. Wait until the status says **ready** (loading the model into memory can take a little while after the download).
+5. In text or voice, ask something general: “What is the capital of France?” The reply should **not** say it used the backend.
+6. Say “open YouTube” or “flashlight on”. Those stay on the phone (YouTube asks you to confirm) and are not sent to the backend.
+7. Turn **Answer on this phone** off and ask again. That reply comes from the backend URL in `local.properties`. Turn it back on to return to the on-device model.
 
 ## What’s in this slice
 
@@ -93,6 +124,7 @@ Anything that does not match a local command is sent to `POST /v1/chat` with the
 - Session context shared between voice and text chat
 - Local-first intent router for phone actions via official APIs/intents
 - `KaiApiClient` aligned with backend `{ messages, session_id }` → `{ content, provider, … }`
+- On-device answers (MediaPipe LLM Inference) with the backend as fallback only
 
 ## Out of scope (later)
 

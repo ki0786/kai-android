@@ -12,6 +12,8 @@ data class ChatMessage(
     val role: MessageRole,
     val text: String,
     val timestampMs: Long = System.currentTimeMillis(),
+    /** Phone-command turns never leave the device, including on backend fallback. */
+    val staysOnDevice: Boolean = false,
 )
 
 /**
@@ -27,6 +29,12 @@ object SessionMessageStore {
 
     fun add(message: ChatMessage) {
         _messages.value = _messages.value + message
+    }
+
+    fun markOnDeviceOnly(id: String) {
+        _messages.value = _messages.value.map { message ->
+            if (message.id == id) message.copy(staysOnDevice = true) else message
+        }
     }
 
     fun clear() {

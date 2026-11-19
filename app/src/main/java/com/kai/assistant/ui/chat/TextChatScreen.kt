@@ -52,6 +52,7 @@ import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.ui.components.OnDeviceStatusBanner
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,8 +75,9 @@ fun TextChatScreen(
             SessionMessageStore.add(
                 ChatMessage(
                     role = MessageRole.Assistant,
-                    text = "Hi — I'm KAI. Local phone commands run on-device; " +
-                        "everything else goes to the backend chat API.",
+                    text = "Hi — I'm KAI. Phone commands stay on this device. " +
+                        "Other questions are answered on the phone when the model is ready, " +
+                        "and use the backend only if it cannot.",
                 ),
             )
         }
@@ -143,6 +145,9 @@ fun TextChatScreen(
                 .imePadding()
                 .navigationBarsPadding(),
         ) {
+            OnDeviceStatusBanner(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -183,6 +188,7 @@ fun TextChatScreen(
                             when (val outcome = processor.handleUserText(text)) {
                                 is TurnOutcome.NeedsConfirmation -> pending = outcome.match
                                 is TurnOutcome.LocalReady,
+                                is TurnOutcome.OnDeviceReady,
                                 is TurnOutcome.CloudReady,
                                 -> Unit
                             }
