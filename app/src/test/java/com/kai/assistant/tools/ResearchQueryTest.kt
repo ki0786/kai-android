@@ -18,6 +18,19 @@ class ResearchQueryTest {
         assertEquals("news", researchQuery("what's the news"))
         assertEquals("gold", researchQuery("latest news about gold"))
         assertEquals("price of gold", researchQuery("what is the current price of gold"))
+        assertEquals(
+            "who is the richest person in the world",
+            researchQuery("who is the richest person in the world"),
+        )
+        assertEquals("What's the weather today", researchQuery("What's the weather today?"))
+        assertEquals("what's the score", researchQuery("what's the score"))
+        assertEquals("who is the current president", researchQuery("who is the current president"))
+        assertEquals("what happened today", researchQuery("what happened today"))
+        assertNull(router.match("who is the richest person in the world"))
+        assertNull(researchQuery("what's on my schedule today"))
+        assertNull(researchQuery("what's today's date"))
+        assertTrue(RESEARCH_UNAVAILABLE.contains("failed"))
+        assertTrue(RESEARCH_UNAVAILABLE.contains("won't guess"))
     }
 
     @Test

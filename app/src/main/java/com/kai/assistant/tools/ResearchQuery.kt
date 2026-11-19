@@ -6,7 +6,7 @@ internal const val RESEARCH_OFFLINE =
     "I'm offline right now, so I couldn't search the web. I don't have sources for that."
 
 internal const val RESEARCH_UNAVAILABLE =
-    "The research service isn't available right now. I don't have sources for that."
+    "The research failed. I don't have a current answer, and I won't guess from an older model."
 
 /**
  * Query for POST /v1/research, or null when the utterance is ordinary chat.
@@ -16,6 +16,7 @@ internal fun researchQuery(raw: String): String? {
     val text = raw.trim().replace(Regex("[?.!,]+$"), "").replace(Regex("""\s+"""), " ").trim()
     if (text.isBlank()) return null
     val lower = text.lowercase()
+    if (isPhoneFact(lower)) return null
     for (pattern in researchPatterns) {
         val match = pattern.find(lower) ?: continue
         val captured = match.groups[1]
@@ -27,6 +28,7 @@ internal fun researchQuery(raw: String): String? {
         }
         if (query.length >= 2) return query
     }
+    if (needsLiveFacts(lower)) return text
     return null
 }
 
@@ -37,8 +39,7 @@ internal fun formatResearchReply(answer: String, sources: List<ResearchSource>):
         "$title\n${source.url}"
     }
     return when {
-        body.isBlank() && listed.isEmpty() ->
-            "The research service didn't return an answer or sources."
+        body.isBlank() && listed.isEmpty() -> RESEARCH_UNAVAILABLE
         listed.isEmpty() -> body
         body.isBlank() -> "Sources:\n" + listed.joinToString("\n")
         else -> body + "\n\nSources:\n" + listed.joinToString("\n")
@@ -46,10 +47,39 @@ internal fun formatResearchReply(answer: String, sources: List<ResearchSource>):
 }
 
 internal fun formatResearchSpoken(answer: String, sources: List<ResearchSource>): String {
+    if (answer.isBlank() && sources.isEmpty()) return RESEARCH_UNAVAILABLE
     val body = answer.trim().ifBlank { "I couldn't get an answer." }
     if (sources.isEmpty()) return body
     val titles = sources.map { it.title.trim().ifBlank { "a source" } }.distinct().take(3)
     return "$body Sources: ${titles.joinToString(", ")}."
+}
+
+private fun isPhoneFact(lower: String): Boolean =
+    Regex(
+        """\b(?:schedule|calendar|screen|battery|alarm|timer|remind|memory|memories|remember)\b""" +
+            """|what(?:'s| is|s)?\s+(?:the\s+)?(?:current\s+)?(?:time|date)\b""" +
+            """|what time is it""" +
+            """|today'?s date""" +
+            """|what did i (?:say|tell)""" +
+            """|on my phone""",
+    ).containsMatchIn(lower)
+
+private fun needsLiveFacts(lower: String): Boolean {
+    if (Regex("""\b(?:richest|weather|forecast)\b""").containsMatchIn(lower)) return true
+    if (Regex("""\bprices?\b""").containsMatchIn(lower)) return true
+    if (Regex("""\bscores?\b""").containsMatchIn(lower)) return true
+    if (Regex("""\b(?:latest|recent)\b""").containsMatchIn(lower)) return true
+    if (Regex("""\b(?:news|headlines)\b""").containsMatchIn(lower)) return true
+    if (Regex(
+            """\b(?:who|what)(?:'s| is|s)?\s+(?:the\s+)?current\b""",
+        ).containsMatchIn(lower)
+    ) {
+        return true
+    }
+    return Regex(
+        """^(?:what|who|whats|what's|when|where|did|does|is|are|tell me|give me)\b.*\btoday\b""" +
+            """|\btoday(?:'s|s)?\s+(?:news|weather|score|price|game|match)\b""",
+    ).containsMatchIn(lower)
 }
 
 private fun patternFallback(lower: String): String {

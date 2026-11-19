@@ -116,10 +116,11 @@ class AssistantTurnProcessor(
         } else {
             null
         }
-        val onDevice = match?.command?.staysOnDevice() == true || planned != null
+        val researched = if (match == null && planned.isNullOrEmpty()) researchQuery(trimmed) else null
+        val onDevice = match?.command?.staysOnDevice() == true || planned != null || researched != null
         ingestUserText(trimmed, deviceOnly = onDevice)
         return try {
-            dispatch(match, trimmed, planned)
+            dispatch(match, planned, researched)
         } finally {
             memory.recordTurn(
                 role = "user",
@@ -131,8 +132,8 @@ class AssistantTurnProcessor(
 
     private suspend fun dispatch(
         match: LocalMatch?,
-        utterance: String,
         planned: List<PlanStep>?,
+        researched: String?,
     ): TurnOutcome {
         if (match != null) {
             // Calls and WhatsApp are resolved on the device. No match, several
@@ -161,8 +162,7 @@ class AssistantTurnProcessor(
                 ),
             )
         }
-        val query = researchQuery(utterance)
-        if (query != null) return callResearch(query)
+        if (researched != null) return callResearch(researched)
         return callCloud()
     }
 
@@ -590,17 +590,20 @@ class AssistantTurnProcessor(
 
     private suspend fun callResearch(query: String): TurnOutcome {
         val result = withContext(Dispatchers.IO) { api.research(query) }
+        val empty = result.answer.isBlank() && result.sources.isEmpty()
         val reply = when {
             result.offline -> RESEARCH_OFFLINE
-            !result.ok -> RESEARCH_UNAVAILABLE
+            !result.ok || empty -> RESEARCH_UNAVAILABLE
             else -> formatResearchReply(result.answer, result.sources)
         }
         val spoken = when {
             result.offline -> RESEARCH_OFFLINE
-            !result.ok -> RESEARCH_UNAVAILABLE
+            !result.ok || empty -> RESEARCH_UNAVAILABLE
             else -> formatResearchSpoken(result.answer, result.sources)
         }
-        SessionMessageStore.add(ChatMessage(role = MessageRole.Assistant, text = reply))
+        SessionMessageStore.add(
+            ChatMessage(role = MessageRole.Assistant, text = reply, deviceOnly = true),
+        )
         memory.recordTurn(role = "assistant", text = reply, allowSecret = false)
         return TurnOutcome.CloudReady(
             reply = reply,
