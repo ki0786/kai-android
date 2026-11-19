@@ -22,6 +22,9 @@ class LocalIntentRouter {
         matchVolume(text)?.let { return it }
         matchAlarm(text)?.let { return it }
         matchTimer(text)?.let { return it }
+        matchScreenshot(text)?.let { return it }
+        matchReminder(text)?.let { return it }
+        matchScreen(text)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
         matchWhatsApp(text)?.let { return it }
@@ -234,6 +237,49 @@ class LocalIntentRouter {
             requiresConfirmation = true,
             confirmationPrompt = "Start a timer for ${describeDuration(seconds)}?",
             spokenLabel = "Starting a timer",
+        )
+    }
+
+    private fun matchScreenshot(text: String): LocalMatch? {
+        val hit = text == "screenshot" ||
+            text == "take a screenshot" ||
+            text == "take screenshot" ||
+            text == "capture the screen" ||
+            text == "capture my screen"
+        if (!hit) return null
+        return LocalMatch(
+            LocalCommand.TakeScreenshot,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Taking a screenshot",
+        )
+    }
+
+    private fun matchReminder(text: String): LocalMatch? {
+        val parsed = ReminderUtterance.parse(text) ?: return null
+        return LocalMatch(
+            LocalCommand.SetReminder(
+                text = parsed.text,
+                hour = parsed.hour,
+                minute = parsed.minute,
+                meridiem = parsed.meridiem,
+            ),
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Setting a reminder",
+        )
+    }
+
+    private fun matchScreen(text: String): LocalMatch? {
+        val hit = Regex(
+            """^(?:what(?:'s| is)?|whats)\s+on\s+(?:my\s+|the\s+)?screen$""",
+        ).matches(text)
+        if (!hit) return null
+        return LocalMatch(
+            LocalCommand.DescribeScreen,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Looking at the screen",
         )
     }
 

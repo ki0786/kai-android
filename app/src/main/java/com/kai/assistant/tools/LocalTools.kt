@@ -1,9 +1,11 @@
 package com.kai.assistant.tools
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.Build
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
@@ -28,9 +30,17 @@ sealed class ToolResult {
     data class Unsupported(val message: String) : ToolResult()
     data class Error(val message: String) : ToolResult()
 
-    /** Chat is already open. Ask once to turn on the WhatsApp send tap. */
-    data class OpenAccessibilitySettings(val message: String) : ToolResult()
+    /** Chat is already open, or the screen can't be read. Ask once to turn a service on. */
+    data class OpenAccessibilitySettings(
+        val message: String,
+        val target: AccessibilityTarget = AccessibilityTarget.WhatsAppSend,
+    ) : ToolResult()
+
+    /** The system screen-capture dialog. Asked on the first screenshot of a session. */
+    data class NeedsScreenshotConsent(val message: String) : ToolResult()
 }
+
+enum class AccessibilityTarget { WhatsAppSend, ScreenReader }
 
 class LocalToolRouter(private val context: Context) {
     private val flashlight = FlashlightTool(context)
@@ -46,6 +56,12 @@ class LocalToolRouter(private val context: Context) {
     fun contactsGranted(): Boolean = calls.hasContactsPermission()
 
     fun callGranted(): Boolean = calls.hasCallPermission()
+
+    fun notificationsGranted(): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return true
+        return context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
 
     fun resolveCall(command: LocalCommand.CallContact): CallResolution = calls.resolve(command)
 
@@ -68,11 +84,50 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
         is LocalCommand.SetAlarm -> alarms.setAlarm(command.hour, command.minute, command.message)
         is LocalCommand.StartTimer -> alarms.startTimer(command.seconds, command.message)
+        LocalCommand.TakeScreenshot -> takeScreenshot()
+        is LocalCommand.SetReminder -> scheduleReminder(command)
+        LocalCommand.DescribeScreen -> describeScreen()
         is LocalCommand.OpenMaps -> openMaps(command.query)
         LocalCommand.OpenCamera -> openCamera()
         is LocalCommand.CallContact -> calls.place(command)
         is LocalCommand.SendWhatsApp -> whatsApp.open(command)
         is LocalCommand.WhatsAppCall -> whatsApp.call(command)
+    }
+
+    private fun takeScreenshot(): ToolResult {
+        if (ScreenshotCaptureService.ready) {
+            ScreenshotCaptureService.captureAgain(context)
+            return ToolResult.Ok("Saving a screenshot on this phone.")
+        }
+        return ToolResult.NeedsScreenshotConsent(
+            "Allow screen capture when Android asks. I'll save the picture on this phone " +
+                "and reuse that permission for later screenshots in this session.",
+        )
+    }
+
+    private fun scheduleReminder(command: LocalCommand.SetReminder): ToolResult {
+        val at = nextReminderMillis(
+            nowMillis = System.currentTimeMillis(),
+            zone = java.time.ZoneId.systemDefault(),
+            hour = command.hour,
+            minute = command.minute,
+            meridiem = command.meridiem,
+        )
+        return ReminderScheduler(context).schedule(command.text, at)
+    }
+
+    private fun describeScreen(): ToolResult {
+        if (!ScreenReaderAccess.isEnabled(context)) {
+            val line = "I can't see this screen because accessibility is off."
+            return if (ScreenReaderAccess.askOnce(context)) {
+                ToolResult.OpenAccessibilitySettings(line, AccessibilityTarget.ScreenReader)
+            } else {
+                ToolResult.Ok(line)
+            }
+        }
+        val service = ScreenReaderAccessibilityService.instance
+            ?: return ToolResult.Ok("I can't see this screen because accessibility is off.")
+        return ToolResult.Ok(service.describeNow())
     }
 
     fun flashlightOn(): ToolResult = flashlight.setEnabled(true)
@@ -215,12 +270,7 @@ class AlarmTimerTool(private val context: Context) {
     }
 
     fun startTimer(seconds: Int, message: String): ToolResult {
-        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
-            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-            .putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return startClockIntent(intent, "Opening timer UI for ${seconds}s.")
+        return TimerScheduler(context).start(seconds)
     }
 
     private fun startClockIntent(intent: Intent, okMessage: String): ToolResult {
@@ -329,6 +379,7 @@ fun ToolResult.messageText(): String = when (this) {
     is ToolResult.Unsupported -> message
     is ToolResult.Error -> message
     is ToolResult.OpenAccessibilitySettings -> message
+    is ToolResult.NeedsScreenshotConsent -> message
 }
 
 fun ToolResult.toast(context: Context) {

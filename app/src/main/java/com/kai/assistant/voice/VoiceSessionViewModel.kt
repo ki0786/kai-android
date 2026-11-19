@@ -7,6 +7,7 @@ import com.kai.assistant.KaiApplication
 import com.kai.assistant.assistant.AssistantTurnProcessor
 import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.LocalMatch
 import com.kai.assistant.tools.staysOnDevice
 import com.kai.assistant.ui.components.MicStatus
@@ -57,6 +58,15 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     private val _accessibilitySettings = MutableStateFlow(0L)
     val accessibilitySettingsRequest: StateFlow<Long> = _accessibilitySettings.asStateFlow()
+    private val _accessibilityTarget = MutableStateFlow(AccessibilityTarget.WhatsAppSend)
+    val accessibilityTarget: StateFlow<AccessibilityTarget> = _accessibilityTarget.asStateFlow()
+
+    private val _notificationPermission = MutableStateFlow<ContactsPermissionRequest?>(null)
+    val notificationPermissionRequest: StateFlow<ContactsPermissionRequest?> =
+        _notificationPermission.asStateFlow()
+
+    private val _screenshotConsent = MutableStateFlow(0L)
+    val screenshotConsentRequest: StateFlow<Long> = _screenshotConsent.asStateFlow()
 
     val messages = SessionMessageStore.messages
 
@@ -184,6 +194,24 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun onNotificationPermissionResult(granted: Boolean) {
+        val request = _notificationPermission.value ?: return
+        _notificationPermission.value = null
+        viewModelScope.launch {
+            _ui.update { it.copy(phase = VoicePhase.Processing) }
+            val outcome = if (granted) {
+                processor.continueAfterNotificationPermission(request.match)
+            } else {
+                TurnOutcome.LocalReady(processor.noteNotificationDenied())
+            }
+            present(outcome)
+        }
+    }
+
+    fun onScreenshotConsentDenied() {
+        present(TurnOutcome.LocalReady(processor.noteScreenshotDenied()))
+    }
+
     fun onCallPermissionResult(granted: Boolean) {
         val request = _callPermission.value ?: return
         _callPermission.value = null
@@ -266,7 +294,19 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.NeedsAccessibilitySettings -> {
+                _accessibilityTarget.value = outcome.target
                 _accessibilitySettings.value = System.nanoTime()
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsNotificationPermission -> {
+                _notificationPermission.value = ContactsPermissionRequest(
+                    token = System.nanoTime(),
+                    match = outcome.pending,
+                )
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsScreenshotConsent -> {
+                _screenshotConsent.value = System.nanoTime()
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)

@@ -9,4 +9,5 @@
     <string name="mic_processing">Processing</string>
     <string name="privacy_no_background">KAI does not record in the background.</string>
     <string name="whatsapp_send_accessibility_description">After you ask KAI to send a WhatsApp message, this taps WhatsApp\'s Send button once. It does not read other apps or tap anything else.</string>
+    <string name="screen_reader_accessibility_description">When you ask what is on your screen, KAI reads the visible text and controls once. It does not tap anything and does not send the screen to a server.</string>
 </resources>

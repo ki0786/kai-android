@@ -52,6 +52,8 @@ You do **not** need the backend for local phone commands (flashlight, battery, v
 | `FLASHLIGHT` | Torch via `CameraManager` (hardware permitting) |
 | `READ_CONTACTS` | Match “call <name>”, WhatsApp messages, and WhatsApp calls on this device. Numbers are not uploaded. |
 | `CALL_PHONE` | Place a phone call with `ACTION_CALL`, and start a WhatsApp voice or video call, after you allow it. The number is not uploaded. |
+| `POST_NOTIFICATIONS` | Tell you when a timer or reminder is due. The text stays on this phone. |
+| Screen capture | “Take a screenshot” asks once per session, then saves the picture on the phone. |
 
 Mic status is always visible in the UI. There is **no** background / always-on recording and no wake word in this milestone.
 
@@ -88,6 +90,10 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “call Kaif” / “phone Mom” (places the call immediately — not sent to the server)
 - “send hi to Mohammed Kaif on WhatsApp” / “WhatsApp Mohammed Kaif hi” (opens the chat and taps Send — not sent to the server)
 - “call Mohammed Kaif on WhatsApp” / “video call Mohammed Kaif on WhatsApp” (WhatsApp call — not sent to the server)
+- “take a screenshot” (saves a picture on the phone; Android asks for screen capture the first time in a session)
+- “set a timer for 5 minutes” (starts a countdown and notifies when it ends — not sent to the server)
+- “remind me to call the supplier at 7” (notification stored on this phone)
+- “what’s on my screen” (reads visible text and controls on the phone; says so if accessibility is off)
 
 Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
 

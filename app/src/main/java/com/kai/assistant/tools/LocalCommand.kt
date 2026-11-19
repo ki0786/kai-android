@@ -16,6 +16,14 @@ sealed class LocalCommand {
     data class AdjustVolume(val deltaSteps: Int) : LocalCommand()
     data class SetAlarm(val hour: Int, val minute: Int, val message: String) : LocalCommand()
     data class StartTimer(val seconds: Int, val message: String) : LocalCommand()
+    data object TakeScreenshot : LocalCommand()
+    data class SetReminder(
+        val text: String,
+        val hour: Int,
+        val minute: Int,
+        val meridiem: String?,
+    ) : LocalCommand()
+    data object DescribeScreen : LocalCommand()
     data class OpenMaps(val query: String) : LocalCommand()
     data object OpenCamera : LocalCommand()
 
@@ -62,7 +70,14 @@ sealed class LocalCommand {
 fun LocalCommand.staysOnDevice(): Boolean =
     this is LocalCommand.CallContact ||
         this is LocalCommand.SendWhatsApp ||
-        this is LocalCommand.WhatsAppCall
+        this is LocalCommand.WhatsAppCall ||
+        this is LocalCommand.StartTimer ||
+        this is LocalCommand.TakeScreenshot ||
+        this is LocalCommand.SetReminder ||
+        this is LocalCommand.DescribeScreen
+
+fun LocalCommand.needsNotification(): Boolean =
+    this is LocalCommand.StartTimer || this is LocalCommand.SetReminder
 
 data class LocalMatch(
     val command: LocalCommand,
