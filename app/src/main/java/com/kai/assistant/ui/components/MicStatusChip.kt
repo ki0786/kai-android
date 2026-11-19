@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 
 enum class MicStatus {
     Off,
+    Wake,
     Listening,
     Processing,
     Speaking,
@@ -35,6 +36,7 @@ fun MicStatusChip(
 ) {
     val (label, color, icon) = when (status) {
         MicStatus.Off -> Triple("Mic off", MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.MicOff)
+        MicStatus.Wake -> Triple("Hey KAI", Color(0xFF059669), Icons.Filled.Mic)
         MicStatus.Listening -> Triple("Listening", Color(0xFF059669), Icons.Filled.Mic)
         MicStatus.Processing -> Triple("Processing", Color(0xFFD97706), Icons.Filled.Mic)
         MicStatus.Speaking -> Triple("Speaking", Color(0xFF2563EB), Icons.AutoMirrored.Filled.VolumeUp)
@@ -50,7 +52,7 @@ fun MicStatusChip(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = label,
             tint = color,
             modifier = Modifier.size(16.dp),
         )

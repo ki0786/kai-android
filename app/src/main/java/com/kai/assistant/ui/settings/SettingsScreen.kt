@@ -123,7 +123,7 @@ fun SettingsScreen(
             SectionTitle("Privacy")
             MicStatusChip(status = MicStatus.Off)
             Text(
-                text = "Mic stays off unless you start a voice session. KAI never records in the background.",
+                text = "Hey KAI listens only on the voice screen. Android won't keep the microphone on in the background.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

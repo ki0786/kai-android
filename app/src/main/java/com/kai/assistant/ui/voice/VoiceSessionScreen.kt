@@ -43,8 +43,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 // Required: capital-M Modifier class (not the modifier package).
 import androidx.compose.ui.Modifier
@@ -53,11 +57,13 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kai.assistant.R
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.ScreenReaderAccess
@@ -88,12 +94,25 @@ fun VoiceSessionScreen(
     val photoRequest by viewModel.photoPickRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    var talkAfterGrant by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) {
-            viewModel.onPushToTalkPressed()
-        }
+        viewModel.onWakeScreenOpen(granted)
+        if (granted && talkAfterGrant) viewModel.onPushToTalkPressed()
+        talkAfterGrant = false
+    }
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) viewModel.onWakeScreenOpen(true) else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.onWakeScreenClosed() }
     }
 
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
@@ -251,7 +270,7 @@ fun VoiceSessionScreen(
             MicStatusChip(status = micStatus)
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "No background recording — mic is only active while you hold.",
+                text = stringResource(R.string.wake_background_limit),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -307,8 +326,10 @@ fun VoiceSessionScreen(
                 enabled = ui.pendingConfirmation == null && ui.phase != VoicePhase.Processing,
                 onHoldChanged = { isHolding ->
                     if (isHolding) {
+                        talkAfterGrant = true
                         ensureMicThen { viewModel.onPushToTalkPressed() }
                     } else {
+                        talkAfterGrant = false
                         viewModel.onPushToTalkReleased()
                     }
                 },
