@@ -46,6 +46,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.style.TextDecoration
 // Required: capital-M Modifier class (not the modifier package).
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -336,6 +341,28 @@ fun TextChatScreen(
     }
 }
 
+private fun linkify(text: String, color: androidx.compose.ui.graphics.Color): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    val urls = Regex("""https?://[^\s)]+""")
+    var cursor = 0
+    for (match in urls.findAll(text)) {
+        val start = match.range.first
+        if (start > cursor) builder.append(text.substring(cursor, start))
+        val url = match.value.trimEnd('.', ',', ';')
+        builder.pushLink(
+            LinkAnnotation.Url(
+                url,
+                TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.Underline)),
+            ),
+        )
+        builder.append(url)
+        builder.pop()
+        cursor = start + url.length
+    }
+    if (cursor < text.length) builder.append(text.substring(cursor))
+    return builder.toAnnotatedString()
+}
+
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val mine = message.role == MessageRole.User
@@ -368,7 +395,11 @@ private fun MessageBubble(message: ChatMessage) {
                 .background(bg)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
-            Text(text = message.text, color = fg, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = linkify(message.text, fg),
+                color = fg,
+                style = MaterialTheme.typography.bodyLarge,
+            )
         }
     }
 }

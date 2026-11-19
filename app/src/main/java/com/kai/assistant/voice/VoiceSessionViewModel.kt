@@ -315,7 +315,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
-            is TurnOutcome.CloudReady -> speakAssistant(outcome.reply)
+            is TurnOutcome.CloudReady -> speakAssistant(outcome.spoken)
         }
     }
 

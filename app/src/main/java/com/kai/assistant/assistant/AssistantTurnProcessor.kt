@@ -17,7 +17,12 @@ import com.kai.assistant.tools.ToolResult
 import com.kai.assistant.tools.WhatsAppCallResolution
 import com.kai.assistant.tools.messageText
 import com.kai.assistant.tools.WhatsAppResolution
+import com.kai.assistant.tools.RESEARCH_OFFLINE
+import com.kai.assistant.tools.RESEARCH_UNAVAILABLE
+import com.kai.assistant.tools.formatResearchReply
+import com.kai.assistant.tools.formatResearchSpoken
 import com.kai.assistant.tools.needsNotification
+import com.kai.assistant.tools.researchQuery
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +54,11 @@ sealed class TurnOutcome {
 
     /** First screenshot in this session. Later shots reuse the grant. */
     data class NeedsScreenshotConsent(val explanation: String) : TurnOutcome()
-    data class CloudReady(val reply: String, val offline: Boolean) : TurnOutcome()
+    data class CloudReady(
+        val reply: String,
+        val offline: Boolean,
+        val spoken: String = reply,
+    ) : TurnOutcome()
 }
 
 /**
@@ -83,7 +92,7 @@ class AssistantTurnProcessor(
         val onDevice = match?.command?.staysOnDevice() == true
         ingestUserText(trimmed, deviceOnly = onDevice)
         return try {
-            dispatch(match)
+            dispatch(match, trimmed)
         } finally {
             memory.recordTurn(
                 role = "user",
@@ -93,7 +102,7 @@ class AssistantTurnProcessor(
         }
     }
 
-    private suspend fun dispatch(match: LocalMatch?): TurnOutcome {
+    private suspend fun dispatch(match: LocalMatch?, utterance: String): TurnOutcome {
         if (match != null) {
             // Calls and WhatsApp are resolved on the device. No match, several
             // matches, and permission prompts never fall through to the backend.
@@ -111,6 +120,8 @@ class AssistantTurnProcessor(
             }
             return executeLocal(match)
         }
+        val query = researchQuery(utterance)
+        if (query != null) return callResearch(query)
         return callCloud()
     }
 
@@ -439,6 +450,27 @@ class AssistantTurnProcessor(
     private fun rememberReady(text: String, deviceOnly: Boolean): TurnOutcome {
         remember(text, deviceOnly)
         return TurnOutcome.LocalReady(text)
+    }
+
+    private suspend fun callResearch(query: String): TurnOutcome {
+        val result = withContext(Dispatchers.IO) { api.research(query) }
+        val reply = when {
+            result.offline -> RESEARCH_OFFLINE
+            !result.ok -> RESEARCH_UNAVAILABLE
+            else -> formatResearchReply(result.answer, result.sources)
+        }
+        val spoken = when {
+            result.offline -> RESEARCH_OFFLINE
+            !result.ok -> RESEARCH_UNAVAILABLE
+            else -> formatResearchSpoken(result.answer, result.sources)
+        }
+        SessionMessageStore.add(ChatMessage(role = MessageRole.Assistant, text = reply))
+        memory.recordTurn(role = "assistant", text = reply, allowSecret = false)
+        return TurnOutcome.CloudReady(
+            reply = reply,
+            offline = result.offline || !result.ok,
+            spoken = spoken,
+        )
     }
 
     private suspend fun callCloud(): TurnOutcome {
