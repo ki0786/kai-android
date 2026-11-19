@@ -1,6 +1,8 @@
 package com.kai.assistant.tools
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -82,10 +84,26 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.LaunchAppByName -> launcher.launchByLabel(command.appName)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
-        is LocalCommand.SetAlarm -> alarms.setAlarm(command.hour, command.minute, command.message)
+        is LocalCommand.SetAlarm -> alarms.setAlarm(
+            command.hour,
+            command.minute,
+            command.message,
+            command.repeat,
+            command.weekday,
+        )
         is LocalCommand.StartTimer -> alarms.startTimer(command.seconds, command.message)
         LocalCommand.TakeScreenshot -> takeScreenshot()
         is LocalCommand.SetReminder -> scheduleReminder(command)
+        is LocalCommand.SetReminders -> scheduleReminders(command.items)
+        is LocalCommand.CancelReminder -> ReminderScheduler(context).cancelMatching(command.query)
+        is LocalCommand.ChangeReminder -> ReminderScheduler(context).changeClock(
+            command.hour,
+            command.minute,
+            command.meridiem,
+            command.newHour,
+            command.newMinute,
+            command.newMeridiem,
+        )
         LocalCommand.DescribeScreen -> describeScreen()
         is LocalCommand.OpenMaps -> openMaps(command.query)
         LocalCommand.OpenCamera -> openCamera()
@@ -105,15 +123,45 @@ class LocalToolRouter(private val context: Context) {
         )
     }
 
-    private fun scheduleReminder(command: LocalCommand.SetReminder): ToolResult {
+    private fun scheduleReminder(command: LocalCommand.SetReminder): ToolResult =
+        ReminderScheduler(context).schedule(reminderSpec(command))
+
+    private fun scheduleReminders(items: List<LocalCommand.SetReminder>): ToolResult {
+        val scheduler = ReminderScheduler(context)
+        val specs = items.map { reminderSpec(it) }
+        specs.forEach { scheduler.schedule(it) }
+        val summary = specs.joinToString(" and ") { spec ->
+            "${spec.text} at ${clockLabel(spec.hour, spec.minute)}"
+        }
+        return ToolResult.Ok("I'll remind you to $summary. They stay on this phone.")
+    }
+
+    private fun reminderSpec(command: LocalCommand.SetReminder): ReminderSpec {
+        val zone = java.time.ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
         val at = nextReminderMillis(
-            nowMillis = System.currentTimeMillis(),
-            zone = java.time.ZoneId.systemDefault(),
+            nowMillis = now,
+            zone = zone,
             hour = command.hour,
             minute = command.minute,
             meridiem = command.meridiem,
+            dayOffset = command.dayOffset,
+            inMinutes = command.inMinutes,
         )
-        return ReminderScheduler(context).schedule(command.text, at)
+        val hour = resolvedHour(command.hour, command.meridiem, at, zone)
+        val minute = if (command.inMinutes != null) {
+            java.time.Instant.ofEpochMilli(at).atZone(zone).minute
+        } else {
+            command.minute
+        }
+        return ReminderSpec(
+            text = command.text,
+            atMillis = at,
+            hour = hour,
+            minute = minute,
+            repeat = command.repeat,
+            weekday = command.weekday,
+        )
     }
 
     private fun describeScreen(): ToolResult {
@@ -259,31 +307,92 @@ class LaunchAppTool(private val context: Context) {
 }
 
 class AlarmTimerTool(private val context: Context) {
-    fun setAlarm(hour: Int, minute: Int, message: String): ToolResult {
+    fun setAlarm(
+        hour: Int,
+        minute: Int,
+        message: String,
+        repeat: ReminderRepeat = ReminderRepeat.Once,
+        weekday: Int? = null,
+    ): ToolResult {
+        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
+        if (tryLaunchClock(hour, minute, message, repeat, weekday)) {
+            return ToolResult.Ok(spoken)
+        }
+        return LocalClockAlarmScheduler(context).schedule(hour, minute, message, repeat, weekday, spoken)
+    }
+
+    /**
+     * Opens the default clock on [AlarmClock.ACTION_SET_ALARM].
+     * Some clocks, including Vivo's, throw SecurityException. That is not shown.
+     */
+    private fun tryLaunchClock(
+        hour: Int,
+        minute: Int,
+        message: String,
+        repeat: ReminderRepeat,
+        weekday: Int?,
+    ): Boolean {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, message)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val clock = "%d:%02d".format(hour, minute)
-        return startClockIntent(intent, "Alarm set for $clock.")
+        alarmDays(repeat, weekday)?.let { intent.putExtra(AlarmClock.EXTRA_DAYS, it) }
+        resolveDefaultAlarm(intent)?.let { intent.component = it }
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (_: SecurityException) {
+            false
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
+    }
+
+    private fun resolveDefaultAlarm(intent: Intent): ComponentName? {
+        val pm = context.packageManager
+        val preferred = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val info = preferred?.activityInfo
+        if (info != null) return ComponentName(info.packageName, info.name)
+        val any = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+            .firstOrNull { it.activityInfo.exported }
+        return any?.let { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+    }
+
+    private fun alarmDays(repeat: ReminderRepeat, weekday: Int?): java.util.ArrayList<Int>? {
+        val days = when (repeat) {
+            ReminderRepeat.Once -> return null
+            ReminderRepeat.Daily -> listOf(
+                java.util.Calendar.SUNDAY,
+                java.util.Calendar.MONDAY,
+                java.util.Calendar.TUESDAY,
+                java.util.Calendar.WEDNESDAY,
+                java.util.Calendar.THURSDAY,
+                java.util.Calendar.FRIDAY,
+                java.util.Calendar.SATURDAY,
+            )
+            ReminderRepeat.Weekdays -> listOf(
+                java.util.Calendar.MONDAY,
+                java.util.Calendar.TUESDAY,
+                java.util.Calendar.WEDNESDAY,
+                java.util.Calendar.THURSDAY,
+                java.util.Calendar.FRIDAY,
+            )
+            ReminderRepeat.Weekly -> listOf(isoWeekdayToCalendar(weekday ?: java.time.DayOfWeek.MONDAY.value))
+        }
+        return java.util.ArrayList(days)
+    }
+
+    /** ISO Monday=1 … Sunday=7 to [java.util.Calendar] day constants. */
+    private fun isoWeekdayToCalendar(iso: Int): Int = if (iso == 7) {
+        java.util.Calendar.SUNDAY
+    } else {
+        iso + 1
     }
 
     fun startTimer(seconds: Int, message: String): ToolResult {
         return TimerScheduler(context).start(seconds)
-    }
-
-    private fun startClockIntent(intent: Intent, okMessage: String): ToolResult {
-        return runCatching {
-            if (intent.resolveActivity(context.packageManager) == null) {
-                return ToolResult.Unsupported(
-                    "No clock app handles alarms/timers on this device.",
-                )
-            }
-            context.startActivity(intent)
-            ToolResult.Ok(okMessage)
-        }.getOrElse { ToolResult.Error(it.message ?: "Clock intent failed.") }
     }
 }
 

@@ -126,6 +126,9 @@
             android:name=".tools.ReminderAlarmReceiver"
             android:exported="false" />
         <receiver
+            android:name=".tools.ClockAlarmReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".tools.BootScheduleReceiver"
             android:exported="true">
             <intent-filter>

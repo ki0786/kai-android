@@ -24,6 +24,7 @@ class LocalIntentRouter {
         matchAlarm(text)?.let { return it }
         matchTimer(text)?.let { return it }
         matchScreenshot(text)?.let { return it }
+        matchReminderEdit(text)?.let { return it }
         matchReminder(text)?.let { return it }
         matchScreen(text)?.let { return it }
         matchMaps(text)?.let { return it }
@@ -187,36 +188,37 @@ class LocalIntentRouter {
     }
 
     private fun matchAlarm(text: String): LocalMatch? {
-        // "set an alarm for 7:30" / "set alarm for 7" / "set an alarm for 7 30 am"
+        val (core, repeat, weekday) = stripReminderRepeat(text)
+        // "set an alarm for 7:30" / "set alarm for 7" / "set an alarm for 6:30 a.m."
         val withMinutes = Regex(
             """^set\s+(an\s+|a\s+)?alarm\s+(for\s+)?(\d{1,2})(?::|\s+)(\d{2})\s*(am|pm)?$""",
-        ).find(text)
+        ).find(core)
         if (withMinutes != null) {
             var hour = withMinutes.groupValues[3].toInt()
             val minute = withMinutes.groupValues[4].toInt().coerceIn(0, 59)
             val meridiem = withMinutes.groupValues[5]
             hour = normalizeHour(hour, meridiem)
-            return LocalMatch(
-                LocalCommand.SetAlarm(hour, minute, "KAI alarm"),
-                requiresConfirmation = true,
-                confirmationPrompt = "Set an alarm for ${formatClock(hour, minute)}?",
-                spokenLabel = "Setting an alarm",
-            )
+            return alarmMatch(hour, minute, repeat, weekday)
         }
 
         val hourOnly = Regex(
             """^set\s+(an\s+|a\s+)?alarm\s+(for\s+)?(\d{1,2})\s*(am|pm)$""",
-        ).find(text)
+        ).find(core)
         if (hourOnly != null) {
             val hour = normalizeHour(hourOnly.groupValues[3].toInt(), hourOnly.groupValues[4])
-            return LocalMatch(
-                LocalCommand.SetAlarm(hour, 0, "KAI alarm"),
-                requiresConfirmation = true,
-                confirmationPrompt = "Set an alarm for ${formatClock(hour, 0)}?",
-                spokenLabel = "Setting an alarm",
-            )
+            return alarmMatch(hour, 0, repeat, weekday)
         }
         return null
+    }
+
+    private fun alarmMatch(hour: Int, minute: Int, repeat: ReminderRepeat, weekday: Int?): LocalMatch {
+        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
+        return LocalMatch(
+            LocalCommand.SetAlarm(hour, minute, "KAI alarm", repeat, weekday),
+            requiresConfirmation = true,
+            confirmationPrompt = "Set an alarm${spoken.removePrefix("Alarm set").removeSuffix(".")}?",
+            spokenLabel = "Setting an alarm",
+        )
     }
 
     private fun matchTimer(text: String): LocalMatch? {
@@ -256,19 +258,70 @@ class LocalIntentRouter {
         )
     }
 
+    private fun matchReminderEdit(text: String): LocalMatch? {
+        ReminderUtterance.parseCancel(text)?.let { query ->
+            return LocalMatch(
+                LocalCommand.CancelReminder(query),
+                requiresConfirmation = false,
+                confirmationPrompt = "",
+                spokenLabel = "Cancelling a reminder",
+            )
+        }
+        ReminderUtterance.parseChange(text)?.let { command ->
+            return LocalMatch(
+                command,
+                requiresConfirmation = false,
+                confirmationPrompt = "",
+                spokenLabel = "Changing a reminder",
+            )
+        }
+        return null
+    }
+
     private fun matchReminder(text: String): LocalMatch? {
-        val parsed = ReminderUtterance.parse(text) ?: return null
-        return LocalMatch(
+        val parsed = ReminderUtterance.parseAll(text) ?: return null
+        val items = parsed.map { item ->
             LocalCommand.SetReminder(
-                text = parsed.text,
-                hour = parsed.hour,
-                minute = parsed.minute,
-                meridiem = parsed.meridiem,
-            ),
+                text = item.text,
+                hour = item.hour,
+                minute = item.minute,
+                meridiem = item.meridiem,
+                repeat = item.repeat,
+                weekday = item.weekday,
+                inMinutes = item.inMinutes,
+                dayOffset = item.dayOffset,
+            )
+        }
+        val command = if (items.size == 1) items.first() else LocalCommand.SetReminders(items)
+        return LocalMatch(
+            command,
             requiresConfirmation = false,
             confirmationPrompt = "",
-            spokenLabel = "Setting a reminder",
+            spokenLabel = if (items.size == 1) "Setting a reminder" else "Setting reminders",
         )
+    }
+
+    private fun stripReminderRepeat(text: String): Triple<String, ReminderRepeat, Int?> {
+        val weekly = Regex(
+            """\s+every\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$""",
+        ).find(text)
+        if (weekly != null) {
+            val day = mapOf(
+                "monday" to 1,
+                "tuesday" to 2,
+                "wednesday" to 3,
+                "thursday" to 4,
+                "friday" to 5,
+                "saturday" to 6,
+                "sunday" to 7,
+            ).getValue(weekly.groupValues[1])
+            return Triple(text.removeSuffix(weekly.value).trim(), ReminderRepeat.Weekly, day)
+        }
+        val daily = Regex("""\s+(?:every\s+day|daily)$""").find(text)
+        if (daily != null) return Triple(text.removeSuffix(daily.value).trim(), ReminderRepeat.Daily, null)
+        val weekdays = Regex("""\s+(?:every\s+weekday|on\s+weekdays|weekdays)$""").find(text)
+        if (weekdays != null) return Triple(text.removeSuffix(weekdays.value).trim(), ReminderRepeat.Weekdays, null)
+        return Triple(text, ReminderRepeat.Once, null)
     }
 
     private fun matchScreen(text: String): LocalMatch? {

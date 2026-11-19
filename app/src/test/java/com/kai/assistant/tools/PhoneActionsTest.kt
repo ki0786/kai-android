@@ -105,6 +105,76 @@ class PhoneActionsTest {
     }
 
     @Test
+    fun sixTwentySevenPmIsALocalAlarm() {
+        val match = router.match("set an alarm for 6:27 p.m.")
+        assertEquals(LocalCommand.SetAlarm(18, 27, "KAI alarm"), match!!.command)
+        assertTrue(match.command.staysOnDevice())
+        assertEquals("Alarm set for 6:27 p.m.", alarmSpokenLine(18, 27))
+        assertEquals("Alarm for 6:27 p.m.", alarmFiredLine(18, 27))
+    }
+
+    @Test
+    fun naturalRepeatAndSeveralRemindersStayLocal() {
+        val relative = router.match("remind me to leave in 10 minutes")
+        assertEquals(10, (relative!!.command as LocalCommand.SetReminder).inMinutes)
+        assertTrue(relative.command.staysOnDevice())
+
+        val morning = router.match("remind me to pack tomorrow morning")!!.command as LocalCommand.SetReminder
+        assertEquals(8, morning.hour)
+        assertEquals("am", morning.meridiem)
+        assertEquals(1, morning.dayOffset)
+
+        val tonight = router.match("remind me to call Kaif tonight")!!.command as LocalCommand.SetReminder
+        assertEquals(8, tonight.hour)
+        assertEquals("pm", tonight.meridiem)
+
+        val half = router.match("remind me to leave at half past six")!!.command as LocalCommand.SetReminder
+        assertEquals(6, half.hour)
+        assertEquals(30, half.minute)
+
+        val daily = router.match("remind me to take medicine at 9 every day")!!.command as LocalCommand.SetReminder
+        assertEquals(ReminderRepeat.Daily, daily.repeat)
+
+        val monday = router.match("remind me to call Kaif every Monday at 6")!!.command as LocalCommand.SetReminder
+        assertEquals(ReminderRepeat.Weekly, monday.repeat)
+        assertEquals(java.time.DayOfWeek.MONDAY.value, monday.weekday)
+
+        val weekdays = router.match("remind me to stand up at 9 on weekdays")!!.command as LocalCommand.SetReminder
+        assertEquals(ReminderRepeat.Weekdays, weekdays.repeat)
+
+        val both = router.match("remind me to call Kaif at 6 and to take medicine at 9")!!.command
+        assertTrue(both is LocalCommand.SetReminders)
+        val items = (both as LocalCommand.SetReminders).items
+        assertEquals("call kaif", items[0].text)
+        assertEquals("take medicine", items[1].text)
+        assertTrue(both.staysOnDevice())
+
+        val cancel = router.match("cancel the reminder to call Kaif")!!.command
+        assertEquals(LocalCommand.CancelReminder("call kaif"), cancel)
+        assertFalse(cancel is LocalCommand.CallContact)
+
+        val change = router.match("change the 6 p.m. reminder to 7")!!.command as LocalCommand.ChangeReminder
+        assertEquals(6, change.hour)
+        assertEquals("pm", change.meridiem)
+        assertEquals(7, change.newHour)
+        assertTrue(change.staysOnDevice())
+    }
+
+    @Test
+    fun speechUsesTheRequestLanguageOnlyWhenTheVoiceExists() {
+        assertEquals("hi", replyLanguage("अलार्म लगाओ", "en"))
+        assertEquals("kn", replyLanguage("ಅಲಾರ್ಮ್", "en"))
+        assertEquals("en", replyLanguage("set an alarm for 6:30 a.m.", "en"))
+        assertEquals("hi-IN", recognizerLanguageTag("hi"))
+        assertEquals("kn-IN", recognizerLanguageTag("kn"))
+        assertEquals("en-US", recognizerLanguageTag("en"))
+        val english = "Alarm set for 6:30 a.m."
+        assertEquals(english, speechText(english, localizedReply(english, "hi"), languageAvailable = false))
+        assertTrue(speechText(english, localizedReply(english, "hi"), languageAvailable = true).contains("अलार्म"))
+        assertTrue(reminderSpokenLine("call Kaif").contains("call Kaif"))
+    }
+
+    @Test
     fun screenDescriptionUsesVisibleTextAndControls() {
         val spoken = describeScreen(
             "Messages",

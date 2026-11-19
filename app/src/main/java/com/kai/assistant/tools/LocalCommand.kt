@@ -14,7 +14,13 @@ sealed class LocalCommand {
     data class LaunchAppByName(val appName: String) : LocalCommand()
     data class SetVolume(val percent: Int) : LocalCommand()
     data class AdjustVolume(val deltaSteps: Int) : LocalCommand()
-    data class SetAlarm(val hour: Int, val minute: Int, val message: String) : LocalCommand()
+    data class SetAlarm(
+        val hour: Int,
+        val minute: Int,
+        val message: String,
+        val repeat: ReminderRepeat = ReminderRepeat.Once,
+        val weekday: Int? = null,
+    ) : LocalCommand()
     data class StartTimer(val seconds: Int, val message: String) : LocalCommand()
     data object TakeScreenshot : LocalCommand()
     data class SetReminder(
@@ -22,6 +28,23 @@ sealed class LocalCommand {
         val hour: Int,
         val minute: Int,
         val meridiem: String?,
+        val repeat: ReminderRepeat = ReminderRepeat.Once,
+        val weekday: Int? = null,
+        val inMinutes: Int? = null,
+        val dayOffset: Int = 0,
+    ) : LocalCommand()
+
+    data class SetReminders(val items: List<SetReminder>) : LocalCommand()
+
+    data class CancelReminder(val query: String) : LocalCommand()
+
+    data class ChangeReminder(
+        val hour: Int,
+        val minute: Int,
+        val meridiem: String?,
+        val newHour: Int,
+        val newMinute: Int,
+        val newMeridiem: String?,
     ) : LocalCommand()
     data object DescribeScreen : LocalCommand()
     data class OpenMaps(val query: String) : LocalCommand()
@@ -75,10 +98,18 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.StartTimer ||
         this is LocalCommand.TakeScreenshot ||
         this is LocalCommand.SetReminder ||
+        this is LocalCommand.SetReminders ||
+        this is LocalCommand.CancelReminder ||
+        this is LocalCommand.ChangeReminder ||
         this is LocalCommand.DescribeScreen
 
 fun LocalCommand.needsNotification(): Boolean =
-    this is LocalCommand.StartTimer || this is LocalCommand.SetReminder
+    this is LocalCommand.StartTimer ||
+        this is LocalCommand.SetReminder ||
+        this is LocalCommand.SetReminders ||
+        this is LocalCommand.ChangeReminder
+
+enum class ReminderRepeat { Once, Daily, Weekdays, Weekly }
 
 data class LocalMatch(
     val command: LocalCommand,

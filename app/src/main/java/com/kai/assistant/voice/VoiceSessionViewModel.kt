@@ -9,6 +9,9 @@ import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.SessionMessageStore
 import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.SpokenAlert
+import com.kai.assistant.tools.recognizerLanguageTag
+import com.kai.assistant.tools.replyLanguage
 import com.kai.assistant.tools.staysOnDevice
 import com.kai.assistant.ui.components.MicStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +82,9 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MicStatus.Off)
 
+    private var settingsLanguage: String = "en"
+    private var turnLanguage: String = "en"
+
     private val tts = TextToSpeechManager(
         context = application,
         onSpeakingChanged = { speaking ->
@@ -128,12 +134,8 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         _ui.update { it.copy(sttAvailable = stt.isAvailable()) }
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
-                val langTag = when (settings.languageCode) {
-                    "hi" -> "hi-IN"
-                    "kn" -> "kn-IN"
-                    else -> "en-US"
-                }
-                stt.setLanguageTag(langTag)
+                settingsLanguage = settings.languageCode
+                stt.setLanguageTag(recognizerLanguageTag(settings.languageCode))
                 tts.updatePreferences(
                     languageCode = settings.languageCode,
                     voiceGender = settings.voiceGender,
@@ -146,6 +148,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     fun onPushToTalkPressed() {
         if (_ui.value.pendingConfirmation != null) return
         tts.stop()
+        SpokenAlert.stop()
         if (!stt.isAvailable()) {
             _ui.update {
                 it.copy(statusLine = "Speech recognition unavailable. Use text chat instead.")
@@ -164,6 +167,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     fun interruptSpeech() {
         tts.stop()
+        SpokenAlert.stop()
         _ui.update {
             it.copy(
                 phase = VoicePhase.Idle,
@@ -264,6 +268,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private suspend fun processUtterance(text: String) {
+        turnLanguage = replyLanguage(text, settingsLanguage)
         present(processor.handleUserText(text))
     }
 
@@ -321,7 +326,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 statusLine = reply,
             )
         }
-        tts.speak(reply)
+        tts.speak(reply, turnLanguage)
     }
 
     override fun onCleared() {

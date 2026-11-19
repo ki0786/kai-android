@@ -8,6 +8,9 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import com.kai.assistant.data.VoiceGender
+import com.kai.assistant.tools.localizedReply
+import com.kai.assistant.tools.recognizerLanguageTag
+import com.kai.assistant.tools.speechText
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,6 +30,7 @@ class TextToSpeechManager(
     private var gender: VoiceGender = VoiceGender.Female
     private var languageTag: String = Locale.getDefault().toLanguageTag()
     private var pendingSpeak: String? = null
+    private var pendingLanguage: String? = null
     private var tts: TextToSpeech? = null
 
     init {
@@ -58,8 +62,10 @@ class TextToSpeechManager(
                 }
             })
             pendingSpeak?.let { text ->
+                val language = pendingLanguage
                 pendingSpeak = null
-                speakInternal(engine, text)
+                pendingLanguage = null
+                speakInternal(engine, text, language)
             }
             mainHandler.post { onReady(true) }
         }
@@ -78,15 +84,16 @@ class TextToSpeechManager(
         }
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, languageCode: String? = null) {
         if (text.isBlank()) return
         mainHandler.post {
             val engine = tts
             if (!ready.get() || engine == null) {
                 pendingSpeak = text
+                pendingLanguage = languageCode
                 return@post
             }
-            speakInternal(engine, text)
+            speakInternal(engine, text, languageCode)
         }
     }
 
@@ -111,10 +118,21 @@ class TextToSpeechManager(
         }
     }
 
-    private fun speakInternal(engine: TextToSpeech, text: String) {
-        applyVoicePreferences(engine)
+    private fun speakInternal(engine: TextToSpeech, text: String, languageCode: String?) {
+        val localized = if (languageCode != null) localizedReply(text, languageCode) else null
+        val want = languageCode?.let { recognizerLanguageTag(it) }
+        val locale = want?.let { Locale.forLanguageTag(it) }
+        val available = locale != null && languageCode != "en" &&
+            engine.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
+        val spoken = speechText(text, localized, available)
+        if (available && locale != null) {
+            engine.language = locale
+            engine.setSpeechRate(speechRate)
+        } else {
+            applyVoicePreferences(engine)
+        }
         val utteranceId = UUID.randomUUID().toString()
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
+        engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
     }
 
     private fun applyVoicePreferences(engine: TextToSpeech) {
