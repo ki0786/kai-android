@@ -49,6 +49,9 @@ class LocalToolRouter(private val context: Context) {
     fun resolveWhatsApp(command: LocalCommand.SendWhatsApp): WhatsAppResolution =
         whatsApp.resolve(command)
 
+    fun resolveWhatsAppCall(command: LocalCommand.WhatsAppCall): WhatsAppCallResolution =
+        whatsApp.resolveCall(command)
+
     fun execute(command: LocalCommand): ToolResult = when (command) {
         is LocalCommand.Flashlight -> flashlight.setEnabled(command.enabled)
         LocalCommand.BatteryStatus -> battery.status()
@@ -66,6 +69,7 @@ class LocalToolRouter(private val context: Context) {
         LocalCommand.OpenCamera -> openCamera()
         is LocalCommand.CallContact -> calls.place(command)
         is LocalCommand.SendWhatsApp -> whatsApp.open(command)
+        is LocalCommand.WhatsAppCall -> whatsApp.call(command)
     }
 
     fun flashlightOn(): ToolResult = flashlight.setEnabled(true)

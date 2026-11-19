@@ -175,7 +175,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             val outcome = if (granted) {
                 processor.continueCall(request.match)
             } else {
-                TurnOutcome.LocalReady(processor.noteContactsPermissionDenied())
+                TurnOutcome.LocalReady(processor.noteContactsPermissionDenied(request.match.command))
             }
             present(outcome)
         }
@@ -189,7 +189,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             val outcome = if (granted) {
                 processor.continueAfterCallPermission(request.match)
             } else {
-                TurnOutcome.LocalReady(processor.noteCallPermissionDenied())
+                TurnOutcome.LocalReady(processor.noteCallPermissionDenied(request.match.command))
             }
             present(outcome)
         }

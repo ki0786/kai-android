@@ -98,7 +98,7 @@ fun TextChatScreen(
             val outcome = if (granted) {
                 processor.continueCall(match)
             } else {
-                processor.noteContactsPermissionDenied()
+                processor.noteContactsPermissionDenied(match.command)
                 null
             }
             applyCallOutcome(outcome)
@@ -116,7 +116,7 @@ fun TextChatScreen(
             val outcome = if (granted) {
                 processor.continueAfterCallPermission(match)
             } else {
-                processor.noteCallPermissionDenied()
+                processor.noteCallPermissionDenied(match.command)
                 null
             }
             applyCallOutcome(outcome)

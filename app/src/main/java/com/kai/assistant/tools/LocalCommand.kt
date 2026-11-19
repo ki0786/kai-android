@@ -33,7 +33,7 @@ sealed class LocalCommand {
     ) : LocalCommand()
 
     /**
-     * Open WhatsApp to an on-device contact with [resolvedMessage] filled in.
+     * Hand [resolvedMessage] to WhatsApp for one on-device contact.
      * [options] is longest contact name first.
      */
     data class SendWhatsApp(
@@ -45,10 +45,24 @@ sealed class LocalCommand {
         val nameQuery: String
             get() = options.firstOrNull()?.nameQuery.orEmpty()
     }
+
+    /**
+     * Start a WhatsApp voice or video call to one on-device contact.
+     * [video] is false for a voice call.
+     */
+    data class WhatsAppCall(
+        val nameQuery: String,
+        val video: Boolean,
+        val resolvedContactId: Long? = null,
+        val resolvedNumber: String? = null,
+        val resolvedName: String? = null,
+    ) : LocalCommand()
 }
 
 fun LocalCommand.staysOnDevice(): Boolean =
-    this is LocalCommand.CallContact || this is LocalCommand.SendWhatsApp
+    this is LocalCommand.CallContact ||
+        this is LocalCommand.SendWhatsApp ||
+        this is LocalCommand.WhatsAppCall
 
 data class LocalMatch(
     val command: LocalCommand,

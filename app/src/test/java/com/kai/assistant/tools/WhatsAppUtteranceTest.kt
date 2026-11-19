@@ -34,6 +34,7 @@ class WhatsAppUtteranceTest {
         assertEquals("Mohammed Kaif", ready.displayName)
         assertEquals("222", ready.number)
         assertEquals("hi", ready.message)
+        assertEquals(2L, ready.contactId)
     }
 
     @Test
@@ -61,5 +62,53 @@ class WhatsAppUtteranceTest {
         assertNull(WhatsAppUtterance.parse("call kaif"))
         assertNull(WhatsAppUtterance.parse("send hi to mom"))
         assertNull(WhatsAppUtterance.parse("whatsapp"))
+        assertNull(WhatsAppUtterance.parseCall("call kaif"))
+        assertNull(WhatsAppUtterance.parse("call mohammed kaif on whatsapp"))
+    }
+
+    @Test
+    fun voiceAndVideoCallsResolveOneContact() {
+        val voice = WhatsAppUtterance.parseCall("call mohammed kaif on whatsapp")
+        assertEquals("mohammed kaif", voice!!.nameQuery)
+        assertEquals(false, voice.video)
+        val video = WhatsAppUtterance.parseCall("video call mohammed kaif on whatsapp")
+        assertEquals(true, video!!.video)
+        assertEquals("mohammed kaif", video.nameQuery)
+        assertEquals(
+            "kaif",
+            WhatsAppUtterance.parseCall("whatsapp call kaif")!!.nameQuery,
+        )
+
+        val phones = listOf(ContactPhone(7, "Mohammed Kaif", "+91 90000 11111", PhoneKind.Mobile))
+        val ready = WhatsAppResolver.resolveContact("mohammed kaif", phones) as WhatsAppCallResolution.Ready
+        assertEquals(7L, ready.contactId)
+        assertEquals("Mohammed Kaif", ready.displayName)
+
+        val several = WhatsAppResolver.resolveContact(
+            "kaif",
+            listOf(
+                ContactPhone(1, "Kaif Ahmed", "111", PhoneKind.Mobile),
+                ContactPhone(2, "Kaif Khan", "222", PhoneKind.Mobile),
+            ),
+        )
+        assertTrue(several is WhatsAppCallResolution.Speak)
+    }
+
+    @Test
+    fun messageJidAndCallMime() {
+        assertEquals("919000011111@s.whatsapp.net", messageJid("+91 90000 11111"))
+        assertNull(messageJid("12"))
+        assertEquals(
+            "vnd.android.cursor.item/vnd.com.whatsapp.voip.call",
+            callMime("com.whatsapp", video = false),
+        )
+        assertEquals(
+            "vnd.android.cursor.item/vnd.com.whatsapp.video.call",
+            callMime("com.whatsapp", video = true),
+        )
+        assertEquals(
+            "vnd.android.cursor.item/vnd.com.whatsapp.w4b.voip.call",
+            callMime("com.whatsapp.w4b", video = false),
+        )
     }
 }

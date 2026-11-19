@@ -308,13 +308,27 @@ class LocalIntentRouter {
     )
 
     private fun matchWhatsApp(text: String): LocalMatch? {
+        WhatsAppUtterance.parseCall(text)?.let { call ->
+            val label = ContactMatcher.displayQuery(call.nameQuery)
+            val spoken = if (call.video) {
+                "Video calling $label on WhatsApp"
+            } else {
+                "Calling $label on WhatsApp"
+            }
+            return LocalMatch(
+                command = LocalCommand.WhatsAppCall(nameQuery = call.nameQuery, video = call.video),
+                requiresConfirmation = false,
+                confirmationPrompt = "",
+                spokenLabel = spoken,
+            )
+        }
         val parsed = WhatsAppUtterance.parse(text) ?: return null
         val label = ContactMatcher.displayQuery(parsed.nameQuery)
         return LocalMatch(
             command = LocalCommand.SendWhatsApp(options = parsed.options),
             requiresConfirmation = false,
             confirmationPrompt = "",
-            spokenLabel = "Opening WhatsApp to $label",
+            spokenLabel = "Sending ${parsed.message} to $label on WhatsApp",
         )
     }
 
