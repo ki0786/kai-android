@@ -12,6 +12,8 @@ data class ChatMessage(
     val role: MessageRole,
     val text: String,
     val timestampMs: Long = System.currentTimeMillis(),
+    /** Shown in the session, but omitted from backend chat requests. */
+    val deviceOnly: Boolean = false,
 )
 
 /**

@@ -72,6 +72,10 @@ fun SettingsScreen(
         context,
         Manifest.permission.RECORD_AUDIO,
     ) == PackageManager.PERMISSION_GRANTED
+    val contactsGranted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.READ_CONTACTS,
+    ) == PackageManager.PERMISSION_GRANTED
 
     Scaffold(
         topBar = {
@@ -114,6 +118,22 @@ fun SettingsScreen(
                     onClick = { tools.openAppSettings().toast(context) },
                 ) { Text("App permissions") }
             }
+            Text(
+                text = if (contactsGranted) {
+                    "Contacts permission: granted"
+                } else {
+                    "Contacts permission: not granted"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Used only on this phone to match “call <name>”. Numbers are not sent to the server.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { permissionLauncher.launch(Manifest.permission.READ_CONTACTS) },
+            ) { Text("Request contacts") }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Language")

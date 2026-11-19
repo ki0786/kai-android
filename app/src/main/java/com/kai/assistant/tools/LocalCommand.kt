@@ -18,6 +18,19 @@ sealed class LocalCommand {
     data class StartTimer(val seconds: Int, val message: String) : LocalCommand()
     data class OpenMaps(val query: String) : LocalCommand()
     data object OpenCamera : LocalCommand()
+
+    /**
+     * Look up [query] in on-device contacts and hand the number to the phone app.
+     * [rawNumber] skips the lookup and dials [query] (or [resolvedNumber]) directly.
+     * The resolved number is fixed before confirmation so dialing does not search again.
+     */
+    data class CallContact(
+        val query: String,
+        val phoneType: PhoneKind? = null,
+        val rawNumber: Boolean = false,
+        val resolvedNumber: String? = null,
+        val resolvedName: String? = null,
+    ) : LocalCommand()
 }
 
 data class LocalMatch(

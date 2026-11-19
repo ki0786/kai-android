@@ -7,6 +7,7 @@ import com.kai.assistant.KaiApplication
 import com.kai.assistant.assistant.AssistantTurnProcessor
 import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalMatch
 import com.kai.assistant.ui.components.MicStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,11 @@ enum class VoicePhase {
     Speaking,
 }
 
+data class ContactsPermissionRequest(
+    val token: Long,
+    val match: LocalMatch,
+)
+
 data class VoiceUiState(
     val phase: VoicePhase = VoicePhase.Idle,
     val statusLine: String = "Hold the mic to talk. Release to send.",
@@ -40,6 +46,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     private val _ui = MutableStateFlow(VoiceUiState())
     val uiState: StateFlow<VoiceUiState> = _ui.asStateFlow()
+
+    private val _contactsPermission = MutableStateFlow<ContactsPermissionRequest?>(null)
+    val contactsPermissionRequest: StateFlow<ContactsPermissionRequest?> =
+        _contactsPermission.asStateFlow()
 
     val messages = SessionMessageStore.messages
 
@@ -149,25 +159,29 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         val match = _ui.value.pendingConfirmation ?: return
         _ui.update { it.copy(pendingConfirmation = null, phase = VoicePhase.Processing) }
         viewModelScope.launch {
-            when (val outcome = processor.confirmAndExecute(match)) {
-                is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
-                is TurnOutcome.CloudReady -> speakAssistant(outcome.reply)
-                is TurnOutcome.NeedsConfirmation -> {
-                    _ui.update {
-                        it.copy(
-                            pendingConfirmation = outcome.match,
-                            phase = VoicePhase.Idle,
-                            statusLine = outcome.match.confirmationPrompt,
-                        )
-                    }
-                }
+            present(processor.confirmAndExecute(match))
+        }
+    }
+
+    fun onContactsPermissionResult(granted: Boolean) {
+        val request = _contactsPermission.value ?: return
+        _contactsPermission.value = null
+        viewModelScope.launch {
+            _ui.update { it.copy(phase = VoicePhase.Processing) }
+            val outcome = if (granted) {
+                processor.continueCall(request.match)
+            } else {
+                TurnOutcome.LocalReady(processor.noteContactsPermissionDenied())
             }
+            present(outcome)
         }
     }
 
     fun cancelPending() {
-        if (_ui.value.pendingConfirmation == null) return
-        processor.cancelPendingConfirmation()
+        val pending = _ui.value.pendingConfirmation ?: return
+        processor.cancelPendingConfirmation(
+            deviceOnly = pending.command is LocalCommand.CallContact,
+        )
         _ui.update {
             it.copy(
                 pendingConfirmation = null,
@@ -201,7 +215,11 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private suspend fun processUtterance(text: String) {
-        when (val outcome = processor.handleUserText(text)) {
+        present(processor.handleUserText(text))
+    }
+
+    private fun present(outcome: TurnOutcome) {
+        when (outcome) {
             is TurnOutcome.NeedsConfirmation -> {
                 _ui.update {
                     it.copy(
@@ -211,6 +229,13 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
                 tts.speak(outcome.match.confirmationPrompt)
+            }
+            is TurnOutcome.NeedsContactsPermission -> {
+                _contactsPermission.value = ContactsPermissionRequest(
+                    token = System.nanoTime(),
+                    match = outcome.pending,
+                )
+                speakAssistant(outcome.explanation)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
             is TurnOutcome.CloudReady -> speakAssistant(outcome.reply)
