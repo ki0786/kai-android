@@ -27,6 +27,7 @@ class LocalIntentRouter {
         matchReminderEdit(text)?.let { return it }
         matchReminder(text)?.let { return it }
         matchScreen(text)?.let { return it }
+        matchCalendar(utterance)?.let { return it }
         matchMemory(utterance)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
@@ -241,6 +242,34 @@ class LocalIntentRouter {
             requiresConfirmation = true,
             confirmationPrompt = "Start a timer for ${describeDuration(seconds)}?",
             spokenLabel = "Starting a timer",
+        )
+    }
+
+    private fun matchCalendar(utterance: String): LocalMatch? {
+        val request = parseCalendarRequest(utterance) ?: return null
+        val command = when (request) {
+            is CalendarRequest.Add -> LocalCommand.AddCalendarEvent(
+                title = request.title,
+                dayOffset = request.dayOffset,
+                hour = request.hour,
+                minute = request.minute,
+                meridiem = request.meridiem,
+            )
+            is CalendarRequest.Read -> LocalCommand.ReadSchedule(request.dayOffset)
+            is CalendarRequest.Note -> LocalCommand.SaveNote(request.text)
+            CalendarRequest.Briefing -> LocalCommand.DailyBriefing
+        }
+        val label = when (request) {
+            is CalendarRequest.Add -> "Adding a calendar event"
+            is CalendarRequest.Read -> "Reading your schedule"
+            is CalendarRequest.Note -> "Saving a note"
+            CalendarRequest.Briefing -> "Daily briefing"
+        }
+        return LocalMatch(
+            command,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = label,
         )
     }
 

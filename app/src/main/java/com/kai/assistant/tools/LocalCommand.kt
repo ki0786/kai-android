@@ -90,6 +90,20 @@ sealed class LocalCommand {
 
     data class RunPlan(val steps: List<PlanStep>) : LocalCommand()
 
+    data class AddCalendarEvent(
+        val title: String,
+        val dayOffset: Int,
+        val hour: Int,
+        val minute: Int,
+        val meridiem: String?,
+    ) : LocalCommand()
+
+    data class ReadSchedule(val dayOffset: Int) : LocalCommand()
+
+    data class SaveNote(val text: String) : LocalCommand()
+
+    data object DailyBriefing : LocalCommand()
+
     /**
      * Start a WhatsApp voice or video call to one on-device contact.
      * [video] is false for a voice call.
@@ -119,7 +133,11 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.DeleteMemory ||
         this is LocalCommand.EditMemory ||
         this is LocalCommand.RecallMemory ||
-        this is LocalCommand.RunPlan
+        this is LocalCommand.RunPlan ||
+        this is LocalCommand.AddCalendarEvent ||
+        this is LocalCommand.ReadSchedule ||
+        this is LocalCommand.SaveNote ||
+        this is LocalCommand.DailyBriefing
 
 fun LocalCommand.needsNotification(): Boolean = when (this) {
     is LocalCommand.StartTimer,
@@ -130,6 +148,12 @@ fun LocalCommand.needsNotification(): Boolean = when (this) {
     is LocalCommand.RunPlan -> steps.any { it.command.needsNotification() }
     else -> false
 }
+
+fun LocalCommand.needsCalendar(): Boolean =
+    this is LocalCommand.AddCalendarEvent ||
+        this is LocalCommand.ReadSchedule ||
+        this is LocalCommand.DailyBriefing ||
+        this is LocalCommand.RunPlan && steps.any { it.command.needsCalendar() }
 
 enum class ReminderRepeat { Once, Daily, Weekdays, Weekly }
 

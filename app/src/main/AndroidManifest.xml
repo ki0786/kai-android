@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- On-device contact match for "call <name>". Numbers are not uploaded. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Calendar events stay on this phone. Requested at runtime. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <!-- Places the call for one matching contact. Requested at runtime. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- Timers and reminders notify on this phone. Requested at runtime on Android 13+. -->

@@ -87,6 +87,7 @@ fun TextChatScreen(
     var accessRequest by remember { mutableStateOf(0L) }
     var accessTarget by remember { mutableStateOf(AccessibilityTarget.WhatsAppSend) }
     var notificationRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
+    var calendarRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var screenshotRequest by remember { mutableStateOf(0L) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -106,6 +107,9 @@ fun TextChatScreen(
             }
             is TurnOutcome.NeedsNotificationPermission -> {
                 notificationRequest = System.nanoTime() to outcome.pending
+            }
+            is TurnOutcome.NeedsCalendarPermission -> {
+                calendarRequest = System.nanoTime() to outcome.pending
             }
             is TurnOutcome.NeedsScreenshotConsent -> {
                 screenshotRequest = System.nanoTime()
@@ -199,6 +203,26 @@ fun TextChatScreen(
                 WhatsAppSendAccess.settingsIntent(context)
             }
             runCatching { context.startActivity(intent) }
+        }
+    }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ ->
+        val match = calendarRequest?.second ?: return@rememberLauncherForActivityResult
+        calendarRequest = null
+        sending = true
+        scope.launch {
+            applyCallOutcome(processor.continueAfterCalendarPermission(match))
+            sending = false
+        }
+    }
+
+    LaunchedEffect(calendarRequest?.first) {
+        if (calendarRequest != null) {
+            calendarPermissionLauncher.launch(
+                arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+            )
         }
     }
 

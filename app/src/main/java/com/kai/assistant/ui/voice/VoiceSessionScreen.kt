@@ -82,6 +82,7 @@ fun VoiceSessionScreen(
     val accessRequest by viewModel.accessibilitySettingsRequest.collectAsStateWithLifecycle()
     val accessTarget by viewModel.accessibilityTarget.collectAsStateWithLifecycle()
     val notificationRequest by viewModel.notificationPermissionRequest.collectAsStateWithLifecycle()
+    val calendarRequest by viewModel.calendarPermissionRequest.collectAsStateWithLifecycle()
     val screenshotRequest by viewModel.screenshotConsentRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -142,6 +143,20 @@ fun VoiceSessionScreen(
                 WhatsAppSendAccess.settingsIntent(context)
             }
             runCatching { context.startActivity(intent) }
+        }
+    }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        viewModel.onCalendarPermissionResult()
+    }
+
+    LaunchedEffect(calendarRequest?.token) {
+        if (calendarRequest != null) {
+            calendarPermissionLauncher.launch(
+                arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+            )
         }
     }
 
