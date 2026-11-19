@@ -116,6 +116,33 @@ class ContactMatcherTest {
     }
 
     @Test
+    fun closeSpokenNamesPickTheNearestContact() {
+        val kef = ContactMatcher.match(
+            "muhammad kev",
+            listOf(
+                ContactPhone(1, "Muhammad Ali", "111", PhoneKind.Mobile),
+                ContactPhone(2, "Muhammad Kef", "222", PhoneKind.Mobile),
+            ),
+            preferredKind = null,
+        ) as ContactMatchResult.One
+        assertEquals("Muhammad Kef", kef.displayName)
+
+        val muhammad = ContactMatcher.match(
+            "mohamed",
+            listOf(ContactPhone(3, "Muhammad", "333", PhoneKind.Mobile)),
+            preferredKind = null,
+        ) as ContactMatchResult.One
+        assertEquals("Muhammad", muhammad.displayName)
+
+        val nuruddin = ContactMatcher.match(
+            "nurdine",
+            listOf(ContactPhone(4, "Nuruddin", "444", PhoneKind.Mobile)),
+            preferredKind = null,
+        ) as ContactMatchResult.One
+        assertEquals("Nuruddin", nuruddin.displayName)
+    }
+
+    @Test
     fun accentFoldingMatchesJose() {
         val result = ContactMatcher.match(
             "jose",
