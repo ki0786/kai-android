@@ -68,6 +68,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     val notificationPermissionRequest: StateFlow<ContactsPermissionRequest?> =
         _notificationPermission.asStateFlow()
 
+    private val _calendarPermission = MutableStateFlow<ContactsPermissionRequest?>(null)
+    val calendarPermissionRequest: StateFlow<ContactsPermissionRequest?> =
+        _calendarPermission.asStateFlow()
+
     private val _screenshotConsent = MutableStateFlow(0L)
     val screenshotConsentRequest: StateFlow<Long> = _screenshotConsent.asStateFlow()
 
@@ -198,6 +202,15 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun onCalendarPermissionResult() {
+        val request = _calendarPermission.value ?: return
+        _calendarPermission.value = null
+        viewModelScope.launch {
+            _ui.update { it.copy(phase = VoicePhase.Processing) }
+            present(processor.continueAfterCalendarPermission(request.match))
+        }
+    }
+
     fun onNotificationPermissionResult(granted: Boolean) {
         val request = _notificationPermission.value ?: return
         _notificationPermission.value = null
@@ -301,6 +314,13 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             is TurnOutcome.NeedsAccessibilitySettings -> {
                 _accessibilityTarget.value = outcome.target
                 _accessibilitySettings.value = System.nanoTime()
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsCalendarPermission -> {
+                _calendarPermission.value = ContactsPermissionRequest(
+                    token = System.nanoTime(),
+                    match = outcome.pending,
+                )
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.NeedsNotificationPermission -> {

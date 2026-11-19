@@ -52,10 +52,15 @@ class LocalToolRouter(private val context: Context) {
     private val calls = CallContactTool(context)
     private val whatsApp = WhatsAppTool(context)
     private val memory = PersonalMemoryStore(context)
+    private val calendar = CalendarTool(context)
+    private val notes = PhoneNoteStore(context)
+    private val briefing = DailyBriefingTool(context)
 
     fun contactsGranted(): Boolean = calls.hasContactsPermission()
 
     fun callGranted(): Boolean = calls.hasCallPermission()
+
+    fun calendarGranted(): Boolean = calendar.granted()
 
     fun notificationsGranted(): Boolean {
         if (Build.VERSION.SDK_INT < 33) return true
@@ -113,6 +118,21 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.EditMemory -> editMemory(command)
         is LocalCommand.RecallMemory -> recallMemory(command)
         is LocalCommand.RunPlan -> ToolResult.Unsupported("That plan is run by the assistant.")
+        is LocalCommand.AddCalendarEvent -> calendar.addEvent(
+            command.title,
+            command.dayOffset,
+            command.hour,
+            command.minute,
+            command.meridiem,
+        )
+        is LocalCommand.ReadSchedule -> calendar.readSchedule(command.dayOffset)
+        is LocalCommand.SaveNote -> saveNote(command)
+        LocalCommand.DailyBriefing -> briefing.speak()
+    }
+
+    private fun saveNote(command: LocalCommand.SaveNote): ToolResult {
+        notes.add(command.text)
+        return ToolResult.Ok("Noted: ${command.text}. Saved on this phone.")
     }
 
     fun memoryStore(): PersonalMemoryStore = memory

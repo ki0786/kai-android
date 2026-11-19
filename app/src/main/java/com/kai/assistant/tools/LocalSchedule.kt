@@ -459,6 +459,12 @@ class LocalClockAlarmScheduler(private val context: Context) {
     }
 
     /** Rings in the background. Does not open an activity. */
+    fun nextUpcoming(): UpcomingAlarm? {
+        val now = System.currentTimeMillis()
+        val next = all().filter { it.atMillis > now }.minByOrNull { it.atMillis } ?: return null
+        return UpcomingAlarm(hour = next.hour, minute = next.minute, atMillis = next.atMillis)
+    }
+
     fun deliver(id: Int, onSpoken: () -> Unit = {}) {
         val alarm = all().firstOrNull { it.id == id }
         if (alarm == null) {
@@ -566,6 +572,12 @@ class LocalClockAlarmScheduler(private val context: Context) {
         private const val CLOCK_ALARMS = "clock_alarms"
     }
 }
+
+data class UpcomingAlarm(
+    val hour: Int,
+    val minute: Int,
+    val atMillis: Long,
+)
 
 private data class StoredClockAlarm(
     val id: Int,

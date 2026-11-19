@@ -23,6 +23,7 @@ import com.kai.assistant.tools.formatResearchReply
 import com.kai.assistant.tools.formatResearchSpoken
 import com.kai.assistant.tools.PlanStep
 import com.kai.assistant.tools.StepReport
+import com.kai.assistant.tools.needsCalendar
 import com.kai.assistant.tools.needsNotification
 import com.kai.assistant.tools.planIntro
 import com.kai.assistant.tools.planLocalSteps
@@ -55,6 +56,11 @@ sealed class TurnOutcome {
     ) : TurnOutcome()
 
     data class NeedsNotificationPermission(
+        val pending: LocalMatch,
+        val explanation: String,
+    ) : TurnOutcome()
+
+    data class NeedsCalendarPermission(
         val pending: LocalMatch,
         val explanation: String,
     ) : TurnOutcome()
@@ -198,6 +204,23 @@ class AssistantTurnProcessor(
             is LocalCommand.CallContact -> placeResolvedCall(match, promptForCallPermission = false)
             else -> rememberReady("I couldn't continue that on this phone.", deviceOnly = true)
         }
+    }
+
+    suspend fun continueAfterCalendarPermission(match: LocalMatch): TurnOutcome {
+        refreshMemoryGate()
+        if (!tools.calendarGranted()) {
+            if (match.command is LocalCommand.DailyBriefing || match.command is LocalCommand.RunPlan) {
+                return executeLocal(match, promptForCalendar = false)
+            }
+            return TurnOutcome.LocalReady(noteCalendarDenied())
+        }
+        return executeLocal(match)
+    }
+
+    fun noteCalendarDenied(): String {
+        val reply = "I can't read or change your calendar without permission. Nothing was sent to the server."
+        remember(reply, deviceOnly = true)
+        return reply
     }
 
     suspend fun continueAfterNotificationPermission(match: LocalMatch): TurnOutcome {
@@ -441,7 +464,16 @@ class AssistantTurnProcessor(
         }
     }
 
-    private suspend fun executeLocal(match: LocalMatch): TurnOutcome {
+    private suspend fun executeLocal(
+        match: LocalMatch,
+        promptForCalendar: Boolean = true,
+    ): TurnOutcome {
+        if (promptForCalendar && match.command.needsCalendar() && !tools.calendarGranted()) {
+            val explanation = "I need calendar permission to read and add events on this phone. " +
+                "Allow calendar when Android asks. Nothing is sent to the server."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsCalendarPermission(pending = match, explanation = explanation)
+        }
         if (match.command.needsNotification() && !tools.notificationsGranted()) {
             val explanation = "I need notification permission so I can tell you on this phone. " +
                 "Allow notifications when Android asks. Nothing is sent to the server."

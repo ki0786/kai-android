@@ -93,6 +93,10 @@ fun SettingsScreen(
         context,
         Manifest.permission.CALL_PHONE,
     ) == PackageManager.PERMISSION_GRANTED
+    var calendarGranted by remember { mutableStateOf(tools.calendarGranted()) }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { calendarGranted = tools.calendarGranted() }
     val whatsAppSendOn = WhatsAppSendAccess.isEnabled(context)
     val screenReaderOn = ScreenReaderAccess.isEnabled(context)
 
@@ -169,6 +173,26 @@ fun SettingsScreen(
             TextButton(
                 onClick = { permissionLauncher.launch(Manifest.permission.CALL_PHONE) },
             ) { Text("Request phone calls") }
+            Text(
+                text = if (calendarGranted) {
+                    "Calendar permission: granted"
+                } else {
+                    "Calendar permission: not granted"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Used on this phone to add events, read today's schedule, and speak the daily briefing.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = {
+                    calendarPermissionLauncher.launch(
+                        arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+                    )
+                },
+            ) { Text("Request calendar") }
             Text(
                 text = if (whatsAppSendOn) "WhatsApp send: on" else "WhatsApp send: off",
                 style = MaterialTheme.typography.labelLarge,
