@@ -160,17 +160,100 @@ object ContactMatcher {
     fun nameQuality(normalizedQuery: String, displayName: String): Int {
         val name = normalizeName(displayName)
         if (normalizedQuery.isEmpty() || name.isEmpty()) return 0
-        if (normalizedQuery == name) return 2
+        if (normalizedQuery == name) return 100
         val tokens = name.split(" ")
         val queryTokens = normalizedQuery.split(" ")
-        if (queryTokens.size == 1 && normalizedQuery in tokens) return 1
+        if (queryTokens.size == 1 && normalizedQuery in tokens) return 80
         if (queryTokens.size > 1 &&
             tokens.size >= queryTokens.size &&
             tokens.take(queryTokens.size) == queryTokens
         ) {
-            return 1
+            return 80
+        }
+        if (queryTokens.size == tokens.size && queryTokens.zip(tokens).all { (query, token) ->
+                tokensClose(query, token)
+            }
+        ) {
+            val distance = queryTokens.zip(tokens).sumOf { (query, token) -> editDistance(query, token) }
+            return 60 - distance
+        }
+        if (queryTokens.size == 1) {
+            val query = queryTokens.single()
+            val closest = tokens
+                .filter { tokensClose(query, it) }
+                .minOfOrNull { editDistance(query, it) }
+            if (closest != null) return 40 - closest
         }
         return 0
+    }
+
+    private fun tokensClose(query: String, token: String): Boolean {
+        if (query == token) return true
+        if (phoneticKey(query) != phoneticKey(token)) return false
+        val distance = editDistance(query, token)
+        val limit = when {
+            minOf(query.length, token.length) <= 4 -> 1
+            minOf(query.length, token.length) <= 8 -> 3
+            else -> 4
+        }
+        return distance <= limit
+    }
+
+    private fun phoneticKey(token: String): String {
+        if (token.isEmpty()) return ""
+        val folded = buildString {
+            var index = 0
+            while (index < token.length) {
+                val char = token[index]
+                if (char == 'c' && index + 1 < token.length && token[index + 1] == 'k') {
+                    append('k')
+                    index += 2
+                    continue
+                }
+                if (char == 'p' && index + 1 < token.length && token[index + 1] == 'h') {
+                    append('f')
+                    index += 2
+                    continue
+                }
+                append(
+                    when (char) {
+                        'c', 'q', 'k' -> 'k'
+                        'v', 'f' -> 'f'
+                        'z', 's' -> 's'
+                        'x' -> 'k'
+                        else -> char
+                    },
+                )
+                index++
+            }
+        }
+        val key = StringBuilder()
+        folded.forEachIndexed { index, char ->
+            val vowel = char == 'a' || char == 'e' || char == 'i' || char == 'o' || char == 'u' || char == 'y'
+            if (index == 0) {
+                key.append(char)
+            } else if (!vowel && (key.isEmpty() || char != key.last())) {
+                key.append(char)
+            }
+        }
+        return key.toString()
+    }
+
+    private fun editDistance(left: String, right: String): Int {
+        val rows = Array(left.length + 1) { IntArray(right.length + 1) }
+        for (i in left.indices) rows[i + 1][0] = i + 1
+        for (j in right.indices) rows[0][j + 1] = j + 1
+        for (i in left.indices) {
+            for (j in right.indices) {
+                val cost = if (left[i] == right[j]) 0 else 1
+                rows[i + 1][j + 1] = minOf(
+                    rows[i][j + 1] + 1,
+                    rows[i + 1][j] + 1,
+                    rows[i][j] + cost,
+                )
+            }
+        }
+        return rows[left.length][right.length]
     }
 
     private fun pickNumber(

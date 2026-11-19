@@ -648,7 +648,7 @@ class LocalIntentRouter {
     private fun matchLaunchApp(text: String): LocalMatch? {
         val match = Regex("""^(open|launch|start)\s+(the\s+)?(.+?)(\s+app)?$""").find(text) ?: return null
         val name = match.groupValues[3].trim()
-        if (name.isBlank()) return null
+        if (name.isBlank() || name.contains(" and ")) return null
         // Avoid stealing more specific intents already handled above.
         val blocked = setOf(
             "settings", "wifi", "wi-fi", "bluetooth", "camera", "maps",

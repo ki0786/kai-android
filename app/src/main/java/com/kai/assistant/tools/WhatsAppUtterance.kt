@@ -13,7 +13,7 @@ object WhatsAppUtterance {
     }
 
     private val sendForm = Regex(
-        """^(?:please\s+)?send\s+(.+?)\s+to\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
+        """^(?:please\s+)?(?:send|message|text)\s+(.+?)\s+to\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
     )
     private val whatsAppFirst = Regex(
         """^(?:please\s+)?whats\s?app\s+(.+)$""",
@@ -27,6 +27,15 @@ object WhatsAppUtterance {
 
     data class Call(val nameQuery: String, val video: Boolean)
 
+    private val openThenVideo = Regex(
+        """^(?:please\s+)?open\s+whats\s?app\s+and\s+call\s+(.+?)\s+on\s+(?:a\s+)?video\s+call$""",
+    )
+    private val openThenVideoCall = Regex(
+        """^(?:please\s+)?open\s+whats\s?app\s+and\s+video\s+call\s+(.+)$""",
+    )
+    private val openThenVoice = Regex(
+        """^(?:please\s+)?open\s+whats\s?app\s+and\s+(?:voice\s+)?call\s+(.+)$""",
+    )
     private val videoOnApp = Regex(
         """^(?:please\s+)?(?:make\s+a\s+)?video\s+call\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
     )
@@ -60,6 +69,15 @@ object WhatsAppUtterance {
     fun parseCall(normalizedText: String): Call? {
         val text = normalize(normalizedText)
         if (text.isEmpty()) return null
+        openThenVideo.find(text)?.let { match ->
+            return callOrNull(match.groupValues[1], video = true)
+        }
+        openThenVideoCall.find(text)?.let { match ->
+            return callOrNull(match.groupValues[1], video = true)
+        }
+        openThenVoice.find(text)?.let { match ->
+            return callOrNull(match.groupValues[1], video = false)
+        }
         videoOnApp.find(text)?.let { match ->
             return callOrNull(match.groupValues[1], video = true)
         }
@@ -85,10 +103,15 @@ object WhatsAppUtterance {
         var rest = raw.trim().removeSuffix(" please").trim()
         while (true) {
             val next = leadIn.replace(rest, "").trim()
-            if (next == rest) return rest
+            if (next == rest) break
             rest = next
         }
+        return leadingNoise.replace(rest, "").trim()
     }
+
+    private val leadingNoise = Regex(
+        """^(?:noir|noor|nah|now)\s+(?=(?:video\s+)?(?:call|phone|message|text|send|open)\b)""",
+    )
 
     fun splitNameAndMessage(tail: String): List<Option> {
         val tokens = tail.split(Regex("\\s+")).filter { it.isNotBlank() }

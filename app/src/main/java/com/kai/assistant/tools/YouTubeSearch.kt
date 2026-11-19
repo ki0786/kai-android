@@ -21,7 +21,9 @@ internal fun youtubeResultsUrl(query: String): String {
 }
 
 private val youtubeSearch = Regex(
-    """^(?:please\s+)?(?:search|look up|lookup)\s+(?:for\s+)?(.+?)\s+on\s+youtube$""" +
+    """^(?:please\s+)?open\s+youtube\s+and\s+(?:play|watch|search(?:\s+for)?)\s+(.+)$""" +
+        """|^(?:please\s+)?(?:play|watch)\s+(.+?)\s+on\s+youtube$""" +
+        """|^(?:please\s+)?(?:search|look up|lookup)\s+(?:for\s+)?(.+?)\s+on\s+youtube$""" +
         """|^(?:please\s+)?(?:search|look up|lookup)\s+youtube\s+for\s+(.+)$""" +
         """|^(?:please\s+)?youtube\s+search(?:\s+for)?\s+(.+)$""",
 )
