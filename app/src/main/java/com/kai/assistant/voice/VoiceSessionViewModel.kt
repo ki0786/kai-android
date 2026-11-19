@@ -151,6 +151,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             when (val outcome = processor.confirmAndExecute(match)) {
                 is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
+                is TurnOutcome.OnDeviceReady -> speakAssistant(outcome.reply)
                 is TurnOutcome.CloudReady -> speakAssistant(outcome.reply)
                 is TurnOutcome.NeedsConfirmation -> {
                     _ui.update {
@@ -213,6 +214,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 tts.speak(outcome.match.confirmationPrompt)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
+            is TurnOutcome.OnDeviceReady -> speakAssistant(outcome.reply)
             is TurnOutcome.CloudReady -> speakAssistant(outcome.reply)
         }
     }

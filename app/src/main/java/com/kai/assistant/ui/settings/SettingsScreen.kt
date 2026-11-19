@@ -43,12 +43,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.BuildConfig
+import com.kai.assistant.KaiApplication
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
+import com.kai.assistant.ondevice.OnDeviceModel
+import com.kai.assistant.ondevice.OnDevicePhase
 import com.kai.assistant.tools.LocalToolRouter
 import com.kai.assistant.tools.toast
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
+import com.kai.assistant.ui.components.OnDeviceStatusBanner
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,6 +67,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val tools = remember(context) { LocalToolRouter(context) }
+    val onDevice = (context.applicationContext as KaiApplication).onDeviceChat
+    val onDeviceStatus by onDevice.status.collectAsStateWithLifecycle()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -201,6 +207,48 @@ fun SettingsScreen(
                 TextButton(onClick = { tools.openCamera().toast(context) }) { Text("Camera") }
                 TextButton(onClick = { tools.startTimer(60, "KAI timer").toast(context) }) {
                     Text("1‑min timer")
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionTitle("On-device answers")
+            SettingsToggleRow(
+                title = "Answer on this phone",
+                checked = settings.onDeviceAnswers,
+                onCheckedChange = { enabled ->
+                    scope.launch { settingsRepository.setOnDeviceAnswers(enabled) }
+                },
+            )
+            OnDeviceStatusBanner()
+            Text(
+                text = "General questions try ${OnDeviceModel.DISPLAY_NAME} " +
+                    "(${OnDeviceModel.SIZE_LABEL}) on this phone. " +
+                    "The model downloads the first time you need it. " +
+                    "If it is missing, still loading, or errors, KAI uses the backend and says so. " +
+                    "Phone commands never leave the device. Cloud keys stay on the backend.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (settings.onDeviceAnswers &&
+                (onDeviceStatus.phase == OnDevicePhase.NotDownloaded ||
+                    onDeviceStatus.phase == OnDevicePhase.Failed)
+            ) {
+                TextButton(
+                    onClick = {
+                        if (onDeviceStatus.phase == OnDevicePhase.Failed) {
+                            onDevice.retry()
+                        } else {
+                            onDevice.requestDownload()
+                        }
+                    },
+                ) {
+                    Text(
+                        if (onDeviceStatus.phase == OnDevicePhase.Failed) {
+                            "Retry"
+                        } else {
+                            "Download model"
+                        },
+                    )
                 }
             }
 

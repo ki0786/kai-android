@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.ui.components.MicStatusChip
+import com.kai.assistant.ui.components.OnDeviceStatusBanner
 import com.kai.assistant.ui.components.VoiceActivityIndicator
 import com.kai.assistant.voice.VoicePhase
 import com.kai.assistant.voice.VoiceSessionViewModel
@@ -148,6 +149,8 @@ fun VoiceSessionScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            OnDeviceStatusBanner()
 
             Spacer(modifier = Modifier.height(16.dp))
 

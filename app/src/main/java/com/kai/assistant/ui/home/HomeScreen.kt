@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.kai.assistant.R
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
+import com.kai.assistant.ui.components.OnDeviceStatusBanner
 import kotlin.math.sin
 
 @Composable
@@ -114,6 +115,9 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.weight(0.45f))
+
+            OnDeviceStatusBanner()
+            Spacer(modifier = Modifier.height(12.dp))
 
             Button(
                 onClick = onStartVoice,

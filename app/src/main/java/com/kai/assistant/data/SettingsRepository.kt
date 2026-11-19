@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "kai_settings")
@@ -21,6 +22,7 @@ data class KaiSettings(
     val speechRate: Float = 1.0f,
     val memoryEnabled: Boolean = true,
     val darkTheme: Boolean = false,
+    val onDeviceAnswers: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -30,6 +32,7 @@ class SettingsRepository(private val context: Context) {
         val speechRate = floatPreferencesKey("speech_rate")
         val memoryEnabled = booleanPreferencesKey("memory_enabled")
         val darkTheme = booleanPreferencesKey("dark_theme")
+        val onDeviceAnswers = booleanPreferencesKey("on_device_answers")
     }
 
     val settings: Flow<KaiSettings> = context.dataStore.data.map { prefs ->
@@ -41,8 +44,11 @@ class SettingsRepository(private val context: Context) {
             speechRate = prefs[Keys.speechRate] ?: 1.0f,
             memoryEnabled = prefs[Keys.memoryEnabled] ?: true,
             darkTheme = prefs[Keys.darkTheme] ?: false,
+            onDeviceAnswers = prefs[Keys.onDeviceAnswers] ?: true,
         )
     }
+
+    suspend fun current(): KaiSettings = settings.first()
 
     suspend fun setLanguage(code: String) {
         context.dataStore.edit { it[Keys.language] = code }
@@ -62,5 +68,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDarkTheme(enabled: Boolean) {
         context.dataStore.edit { it[Keys.darkTheme] = enabled }
+    }
+
+    suspend fun setOnDeviceAnswers(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.onDeviceAnswers] = enabled }
     }
 }

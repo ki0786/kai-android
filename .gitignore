@@ -51,5 +51,10 @@ obj/
 # Log files
 *.log
 
+# On-device model weights (downloaded on the phone, never commit)
+*.task
+*.tflite
+*.litertlm
+
 # OS
 Thumbs.db
