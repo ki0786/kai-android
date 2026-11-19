@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -38,11 +39,12 @@ data class ContactsPermissionRequest(
 
 data class VoiceUiState(
     val phase: VoicePhase = VoicePhase.Idle,
-    val statusLine: String = "Hold the mic to talk. Release to send.",
+    val statusLine: String = "Say Hey KAI, or hold the mic to talk.",
     val partialText: String = "",
     val pendingConfirmation: LocalMatch? = null,
     val ttsReady: Boolean = false,
     val sttAvailable: Boolean = true,
+    val wakeArmed: Boolean = false,
 )
 
 class VoiceSessionViewModel(application: Application) : AndroidViewModel(application) {
@@ -82,11 +84,12 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     val messages = SessionMessageStore.messages
 
     val micStatus: StateFlow<MicStatus> = _ui.map { state ->
-        when (state.phase) {
-            VoicePhase.Listening -> MicStatus.Listening
-            VoicePhase.Processing -> MicStatus.Processing
-            VoicePhase.Speaking -> MicStatus.Speaking
-            VoicePhase.Idle -> MicStatus.Off
+        when {
+            state.phase == VoicePhase.Listening -> MicStatus.Listening
+            state.phase == VoicePhase.Processing -> MicStatus.Processing
+            state.phase == VoicePhase.Speaking -> MicStatus.Speaking
+            state.wakeArmed -> MicStatus.Wake
+            else -> MicStatus.Off
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MicStatus.Off)
 
@@ -138,8 +141,30 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         },
     )
 
+    private val wake = WakeWordListener(
+        context = application,
+        onPhrase = { heard -> onWakePhrase(heard) },
+        onListening = { listening ->
+            _ui.update { it.copy(wakeArmed = listening) }
+        },
+        onBlocked = { message ->
+            _ui.update { it.copy(wakeArmed = false, statusLine = message) }
+        },
+    )
+
+    private var wakeScreenOpen = false
+    private var wakeMicGranted = false
+
     init {
         _ui.update { it.copy(sttAvailable = stt.isAvailable()) }
+        viewModelScope.launch {
+            _ui.map { it.phase to (it.pendingConfirmation != null) }
+                .distinctUntilChanged()
+                .collect { (phase, confirming) ->
+                    if (!wakeScreenOpen) return@collect
+                    if (phase != VoicePhase.Idle || confirming) wake.disarm() else armWake()
+                }
+        }
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
                 settingsLanguage = settings.languageCode
@@ -153,8 +178,34 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun onWakeScreenOpen(micGranted: Boolean) {
+        wakeScreenOpen = true
+        wakeMicGranted = micGranted
+        if (!micGranted) {
+            wake.disarm()
+            _ui.update {
+                it.copy(
+                    wakeArmed = false,
+                    statusLine = "Allow the microphone to say Hey KAI. $WAKE_BACKGROUND_NOTE",
+                )
+            }
+            return
+        }
+        if (_ui.value.phase == VoicePhase.Idle && _ui.value.pendingConfirmation == null) {
+            _ui.update { it.copy(statusLine = "Say Hey KAI, or hold the mic to talk.") }
+            armWake()
+        }
+    }
+
+    fun onWakeScreenClosed() {
+        wakeScreenOpen = false
+        wake.disarm()
+        _ui.update { it.copy(wakeArmed = false) }
+    }
+
     fun onPushToTalkPressed() {
         if (_ui.value.pendingConfirmation != null) return
+        wake.disarm()
         tts.stop()
         SpokenAlert.stop()
         if (!stt.isAvailable()) {
@@ -371,7 +422,28 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         tts.speak(reply, turnLanguage)
     }
 
+    private fun onWakePhrase(heard: String) {
+        val match = matchHeyKai(heard) ?: return
+        wake.disarm()
+        if (match.command.isBlank()) {
+            onPushToTalkPressed()
+        } else {
+            onSpeechFinal(match.command)
+        }
+    }
+
+    private fun armWake() {
+        if (!wakeScreenOpen || !wakeMicGranted) return
+        if (_ui.value.phase != VoicePhase.Idle || _ui.value.pendingConfirmation != null) return
+        if (!wake.onDeviceAvailable()) {
+            _ui.update { it.copy(wakeArmed = false, statusLine = WAKE_NO_ON_DEVICE) }
+            return
+        }
+        wake.arm()
+    }
+
     override fun onCleared() {
+        wake.destroy()
         stt.destroy()
         tts.destroy()
         super.onCleared()
