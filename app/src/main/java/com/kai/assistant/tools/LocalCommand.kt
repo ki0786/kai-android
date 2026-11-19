@@ -12,6 +12,8 @@ sealed class LocalCommand {
     data object OpenBluetoothSettings : LocalCommand()
     data object OpenAppSettings : LocalCommand()
     data class LaunchAppByName(val appName: String) : LocalCommand()
+
+    data class SearchYouTube(val query: String) : LocalCommand()
     data class SetVolume(val percent: Int) : LocalCommand()
     data class AdjustVolume(val deltaSteps: Int) : LocalCommand()
     data class SetAlarm(
@@ -141,7 +143,11 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.AddCalendarEvent ||
         this is LocalCommand.ReadSchedule ||
         this is LocalCommand.SaveNote ||
-        this is LocalCommand.DailyBriefing
+        this is LocalCommand.DailyBriefing ||
+        this is LocalCommand.LaunchAppByName ||
+        this is LocalCommand.SearchYouTube ||
+        this is LocalCommand.OpenMaps ||
+        this is LocalCommand.OpenCamera
 
 fun LocalCommand.needsNotification(): Boolean = when (this) {
     is LocalCommand.StartTimer,

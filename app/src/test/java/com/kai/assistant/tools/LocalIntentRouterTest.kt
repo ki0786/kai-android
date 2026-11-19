@@ -47,11 +47,12 @@ class LocalIntentRouterTest {
     }
 
     @Test
-    fun launchAppRequiresConfirmation() {
+    fun launchAppOpensImmediately() {
         val match = router.match("open chrome")
         assertNotNull(match)
-        assertTrue(match!!.requiresConfirmation)
+        assertFalse(match!!.requiresConfirmation)
         assertEquals(LocalCommand.LaunchAppByName("chrome"), match.command)
+        assertTrue(match.command.staysOnDevice())
     }
 
     @Test

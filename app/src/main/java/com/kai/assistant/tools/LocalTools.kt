@@ -88,6 +88,7 @@ class LocalToolRouter(private val context: Context) {
         LocalCommand.OpenBluetoothSettings -> settings.openBluetooth()
         LocalCommand.OpenAppSettings -> settings.openAppDetails()
         is LocalCommand.LaunchAppByName -> launcher.launchByLabel(command.appName)
+        is LocalCommand.SearchYouTube -> launcher.searchYouTube(command.query)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
         is LocalCommand.SetAlarm -> alarms.setAlarm(
@@ -369,6 +370,29 @@ class LaunchAppTool(private val context: Context) {
             it.loadLabel(pm).toString().contains(labelQuery, ignoreCase = true)
         }
         return partial?.activityInfo?.packageName
+    }
+
+    fun searchYouTube(query: String): ToolResult {
+        val uri = Uri.parse(youtubeResultsUrl(query))
+        val youtube = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage(YOUTUBE_PACKAGE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val view = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            if (youtube.resolveActivity(context.packageManager) != null) {
+                context.startActivity(youtube)
+            } else {
+                context.startActivity(view)
+            }
+            ToolResult.Ok("Searching YouTube for $query.")
+        }.getOrElse {
+            ToolResult.Error("I couldn't open YouTube.")
+        }
+    }
+
+    private companion object {
+        const val YOUTUBE_PACKAGE = "com.google.android.youtube"
     }
 }
 
