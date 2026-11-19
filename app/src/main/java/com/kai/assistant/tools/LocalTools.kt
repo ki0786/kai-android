@@ -27,6 +27,9 @@ sealed class ToolResult {
     data class NeedsConfirmation(val message: String) : ToolResult()
     data class Unsupported(val message: String) : ToolResult()
     data class Error(val message: String) : ToolResult()
+
+    /** Chat is already open. Ask once to turn on the WhatsApp send tap. */
+    data class OpenAccessibilitySettings(val message: String) : ToolResult()
 }
 
 class LocalToolRouter(private val context: Context) {
@@ -325,6 +328,7 @@ fun ToolResult.messageText(): String = when (this) {
     is ToolResult.NeedsConfirmation -> message
     is ToolResult.Unsupported -> message
     is ToolResult.Error -> message
+    is ToolResult.OpenAccessibilitySettings -> message
 }
 
 fun ToolResult.toast(context: Context) {

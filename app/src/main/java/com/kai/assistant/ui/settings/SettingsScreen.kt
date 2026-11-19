@@ -46,6 +46,7 @@ import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
 import com.kai.assistant.tools.LocalToolRouter
+import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.toast
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
@@ -80,6 +81,7 @@ fun SettingsScreen(
         context,
         Manifest.permission.CALL_PHONE,
     ) == PackageManager.PERMISSION_GRANTED
+    val whatsAppSendOn = WhatsAppSendAccess.isEnabled(context)
 
     Scaffold(
         topBar = {
@@ -154,6 +156,20 @@ fun SettingsScreen(
             TextButton(
                 onClick = { permissionLauncher.launch(Manifest.permission.CALL_PHONE) },
             ) { Text("Request phone calls") }
+            Text(
+                text = if (whatsAppSendOn) "WhatsApp send: on" else "WhatsApp send: off",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Used only to tap Send after you ask KAI to send a WhatsApp message.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = {
+                    runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
+                },
+            ) { Text(if (whatsAppSendOn) "Accessibility settings" else "Turn on WhatsApp send") }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Language")

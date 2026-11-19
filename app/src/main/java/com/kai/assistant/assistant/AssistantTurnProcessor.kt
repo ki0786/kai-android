@@ -13,6 +13,7 @@ import com.kai.assistant.tools.LocalMatch
 import com.kai.assistant.tools.LocalToolRouter
 import com.kai.assistant.tools.ToolResult
 import com.kai.assistant.tools.WhatsAppCallResolution
+import com.kai.assistant.tools.messageText
 import com.kai.assistant.tools.WhatsAppResolution
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,9 @@ sealed class TurnOutcome {
         val pending: LocalMatch,
         val explanation: String,
     ) : TurnOutcome()
+
+    /** WhatsApp chat is open. Ask once to enable the send tap. */
+    data class NeedsAccessibilitySettings(val explanation: String) : TurnOutcome()
     data class CloudReady(val reply: String, val offline: Boolean) : TurnOutcome()
 }
 
@@ -349,14 +353,12 @@ class AssistantTurnProcessor(
         val result = withContext(Dispatchers.Main) {
             tools.execute(match.command)
         }
-        val reply = when (result) {
-            is ToolResult.Ok -> result.message
-            is ToolResult.Unsupported -> result.message
-            is ToolResult.Error -> result.message
-            is ToolResult.NeedsConfirmation -> result.message
-        }
+        val reply = result.messageText()
         val deviceOnly = match.command.staysOnDevice()
         remember(reply, deviceOnly)
+        if (result is ToolResult.OpenAccessibilitySettings) {
+            return TurnOutcome.NeedsAccessibilitySettings(reply)
+        }
         return TurnOutcome.LocalReady(reply)
     }
 

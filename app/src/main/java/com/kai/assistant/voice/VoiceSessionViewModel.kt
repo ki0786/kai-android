@@ -55,6 +55,9 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     val callPermissionRequest: StateFlow<ContactsPermissionRequest?> =
         _callPermission.asStateFlow()
 
+    private val _accessibilitySettings = MutableStateFlow(0L)
+    val accessibilitySettingsRequest: StateFlow<Long> = _accessibilitySettings.asStateFlow()
+
     val messages = SessionMessageStore.messages
 
     val micStatus: StateFlow<MicStatus> = _ui.map { state ->
@@ -260,6 +263,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsAccessibilitySettings -> {
+                _accessibilitySettings.value = System.nanoTime()
                 speakAssistant(outcome.explanation)
             }
             is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)

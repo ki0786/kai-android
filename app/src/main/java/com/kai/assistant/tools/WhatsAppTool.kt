@@ -4,12 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.ContactsContract
 
 /**
  * Hands a message or a voice/video call to the installed WhatsApp app.
- * Text uses ACTION_SEND with the jid extra. WhatsApp does not submit that
- * text from another app, so the spoken result says so and still opens the chat.
+ * Text opens the chat, then the accessibility service taps Send once.
+ * Calls do not arm that tap.
  */
 class WhatsAppTool(context: Context) {
     private val appContext = context.applicationContext
@@ -89,6 +90,44 @@ class WhatsAppTool(context: Context) {
             ?: return ToolResult.Unsupported(
                 "WhatsApp isn't installed on this phone, so I didn't send it.",
             )
+        val digits = jid.substringBefore("@")
+        openFilledChat(pkg, digits, displayName, message)?.let { return it }
+        return openJidSend(pkg, jid, displayName, message)
+    }
+
+    /**
+     * wa.me fills the composer for any number. The accessibility service then taps Send.
+     */
+    private fun openFilledChat(
+        pkg: String,
+        digits: String,
+        displayName: String,
+        message: String,
+    ): ToolResult? {
+        val uri = Uri.parse("https://wa.me/$digits?text=${Uri.encode(message)}")
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+            .setPackage(pkg)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (appContext.packageManager.resolveActivity(intent, 0) == null) return null
+        return try {
+            armSendTap(pkg, message)
+            appContext.startActivity(intent)
+            finishSend(displayName, message)
+        } catch (_: ActivityNotFoundException) {
+            WhatsAppSendRequest.clear()
+            null
+        } catch (error: Exception) {
+            WhatsAppSendRequest.clear()
+            ToolResult.Error(error.message ?: "Could not open WhatsApp for $displayName.")
+        }
+    }
+
+    private fun openJidSend(
+        pkg: String,
+        jid: String,
+        displayName: String,
+        message: String,
+    ): ToolResult {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             setPackage(pkg)
@@ -96,45 +135,38 @@ class WhatsAppTool(context: Context) {
             putExtra(JID_EXTRA, jid)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val started = try {
-            if (appContext.packageManager.resolveActivity(send, 0) != null) {
-                appContext.startActivity(send)
-                true
-            } else {
-                false
-            }
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (error: Exception) {
-            return ToolResult.Error(error.message ?: "Could not open WhatsApp for $displayName.")
+        if (appContext.packageManager.resolveActivity(send, 0) == null) {
+            return ToolResult.Unsupported(
+                "WhatsApp isn't installed on this phone, so I didn't send it.",
+            )
         }
-        if (started) {
-            return ToolResult.Ok(sendResult(displayName, message))
-        }
-        return launchClickToChat(pkg, jid.substringBefore("@"), displayName, message)
-    }
-
-    /**
-     * wa.me opens the right chat for any number. It is the fallback when
-     * WhatsApp will not accept the jid send intent.
-     */
-    private fun launchClickToChat(
-        pkg: String,
-        digits: String,
-        displayName: String,
-        message: String,
-    ): ToolResult {
-        val uri = Uri.parse("https://wa.me/$digits?text=${Uri.encode(message)}")
-        val intent = Intent(Intent.ACTION_VIEW, uri)
-            .setPackage(pkg)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
-            appContext.startActivity(intent)
-            ToolResult.Ok(sendResult(displayName, message))
+            armSendTap(pkg, message)
+            appContext.startActivity(send)
+            finishSend(displayName, message)
         } catch (_: ActivityNotFoundException) {
+            WhatsAppSendRequest.clear()
             ToolResult.Unsupported("WhatsApp isn't installed on this phone, so I didn't send it.")
         } catch (error: Exception) {
+            WhatsAppSendRequest.clear()
             ToolResult.Error(error.message ?: "Could not open WhatsApp for $displayName.")
+        }
+    }
+
+    private fun armSendTap(packageName: String, message: String) {
+        WhatsAppSendRequest.arm(packageName, message, SystemClock.elapsedRealtime())
+    }
+
+    private fun finishSend(displayName: String, message: String): ToolResult {
+        if (WhatsAppSendAccess.isEnabled(appContext)) {
+            return ToolResult.Ok("Sending “$message” to $displayName on WhatsApp.")
+        }
+        val line = "WhatsApp is open to $displayName with the text ready. " +
+            "Turn on KAI in Accessibility settings once so I can tap Send."
+        return if (WhatsAppSendAccess.askOnce(appContext)) {
+            ToolResult.OpenAccessibilitySettings(line)
+        } else {
+            ToolResult.Ok(line)
         }
     }
 
@@ -229,10 +261,6 @@ class WhatsAppTool(context: Context) {
     private companion object {
         const val JID_EXTRA = "jid"
         val PACKAGES = listOf("com.whatsapp", "com.whatsapp.w4b")
-
-        fun sendResult(displayName: String, message: String): String =
-            "Sending “$message” to $displayName on WhatsApp. " +
-                "WhatsApp won't submit that from another app, so the chat is open with the text ready."
     }
 }
 

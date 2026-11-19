@@ -55,7 +55,7 @@ You do **not** need the backend for local phone commands (flashlight, battery, v
 
 Mic status is always visible in the UI. There is **no** background / always-on recording and no wake word in this milestone.
 
-Sensitive local actions (launch app, alarm/timer, maps navigation, camera) ask for confirmation in a dialog before running. A call to one matching contact starts immediately with `ACTION_CALL` after you allow phone calls — there is no confirm dialog and no extra tap in the dialer. If the contact is missing or several people match, KAI says so on the phone and does not send the utterance to the backend. “Send hi to Mohammed Kaif on WhatsApp” stays on the phone and hands WhatsApp an `ACTION_SEND` intent with that contact’s `jid`. WhatsApp does not let another app press Send, so KAI says that and still opens the chat with the text ready. “Call Mohammed Kaif on WhatsApp” and “video call Mohammed Kaif on WhatsApp” start that contact’s WhatsApp voice or video call. A missing WhatsApp install is reported on the device.
+Sensitive local actions (launch app, alarm/timer, maps navigation, camera) ask for confirmation in a dialog before running. A call to one matching contact starts immediately with `ACTION_CALL` after you allow phone calls — there is no confirm dialog and no extra tap in the dialer. If the contact is missing or several people match, KAI says so on the phone and does not send the utterance to the backend. “Send hi to Mohammed Kaif on WhatsApp” stays on the phone, opens that chat with the text filled in, and a KAI accessibility service taps WhatsApp’s Send button once. Turn that service on the first time it asks. If it is off, KAI says so and still opens the chat. The service does not run for calls. “Call Mohammed Kaif on WhatsApp” and “video call Mohammed Kaif on WhatsApp” start that contact’s WhatsApp voice or video call. A missing WhatsApp install is reported on the device.
 
 ## Run on an emulator
 
@@ -86,7 +86,7 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “set a timer for 60 seconds” (confirms first)
 - “open Chrome” / “navigate to nearest coffee” (confirms first)
 - “call Kaif” / “phone Mom” (places the call immediately — not sent to the server)
-- “send hi to Mohammed Kaif on WhatsApp” / “WhatsApp Mohammed Kaif hi” (WhatsApp jid send — not sent to the server)
+- “send hi to Mohammed Kaif on WhatsApp” / “WhatsApp Mohammed Kaif hi” (opens the chat and taps Send — not sent to the server)
 - “call Mohammed Kaif on WhatsApp” / “video call Mohammed Kaif on WhatsApp” (WhatsApp call — not sent to the server)
 
 Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.

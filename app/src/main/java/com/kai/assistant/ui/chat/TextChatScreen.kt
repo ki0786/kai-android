@@ -55,6 +55,7 @@ import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.launch
 
@@ -72,6 +73,7 @@ fun TextChatScreen(
     var pending by remember { mutableStateOf<LocalMatch?>(null) }
     var contactsRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var callRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
+    var accessRequest by remember { mutableStateOf(0L) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -83,6 +85,9 @@ fun TextChatScreen(
             }
             is TurnOutcome.NeedsCallPermission -> {
                 callRequest = System.nanoTime() to outcome.pending
+            }
+            is TurnOutcome.NeedsAccessibilitySettings -> {
+                accessRequest = System.nanoTime()
             }
             else -> Unit
         }
@@ -133,6 +138,12 @@ fun TextChatScreen(
     LaunchedEffect(callRequest?.first) {
         if (callRequest != null) {
             callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
+
+    LaunchedEffect(accessRequest) {
+        if (accessRequest != 0L) {
+            runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
         }
     }
 
