@@ -28,19 +28,19 @@ object WhatsAppUtterance {
     data class Call(val nameQuery: String, val video: Boolean)
 
     private val openThenVideo = Regex(
-        """^(?:please\s+)?open\s+whats\s?app\s+and\s+call\s+(.+?)\s+on\s+(?:a\s+)?video\s+call$""",
+        """^(?:please\s+)?open\s+whats\s?app\s+and\s+call\s+(.+?)\s+on\s+(?:a\s+)?(?:video|vedio)\s+call$""",
     )
     private val openThenVideoCall = Regex(
-        """^(?:please\s+)?open\s+whats\s?app\s+and\s+video\s+call\s+(.+)$""",
+        """^(?:please\s+)?open\s+whats\s?app\s+and\s+(?:video|vedio)\s+call\s+(.+)$""",
     )
     private val openThenVoice = Regex(
         """^(?:please\s+)?open\s+whats\s?app\s+and\s+(?:voice\s+)?call\s+(.+)$""",
     )
     private val videoOnApp = Regex(
-        """^(?:please\s+)?(?:make\s+a\s+)?video\s+call\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
+        """^(?:please\s+)?(?:make\s+a\s+)?(?:video|vedio)\s+call\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
     )
     private val videoFirst = Regex(
-        """^(?:please\s+)?whats\s?app\s+video\s+call\s+(.+)$""",
+        """^(?:please\s+)?whats\s?app\s+(?:video|vedio)\s+call\s+(.+)$""",
     )
     private val voiceOnApp = Regex(
         """^(?:please\s+)?(?:make\s+a\s+)?(?:voice\s+)?(?:call|phone)\s+(.+?)\s+(?:on|via|using|through)\s+whats\s?app$""",
@@ -101,6 +101,7 @@ object WhatsAppUtterance {
 
     private fun normalize(raw: String): String {
         var rest = raw.trim().removeSuffix(" please").trim()
+            .replace(Regex("""\bvedio\b"""), "video")
         while (true) {
             val next = leadIn.replace(rest, "").trim()
             if (next == rest) break
