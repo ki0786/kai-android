@@ -215,7 +215,7 @@ class LocalIntentRouter {
         val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
         return LocalMatch(
             LocalCommand.SetAlarm(hour, minute, "KAI alarm", repeat, weekday),
-            requiresConfirmation = true,
+            requiresConfirmation = false,
             confirmationPrompt = "Set an alarm${spoken.removePrefix("Alarm set").removeSuffix(".")}?",
             spokenLabel = "Setting an alarm",
         )

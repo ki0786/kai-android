@@ -318,112 +318,61 @@ class AlarmTimerTool(private val context: Context) {
         repeat: ReminderRepeat = ReminderRepeat.Once,
         weekday: Int? = null,
     ): ToolResult {
-        val filled = setAlarmIntent(hour, minute, message, repeat, weekday)
-        val exported = exportedActivity(filled)
-        if (exported != null && startActivity(Intent(filled).setComponent(exported))) {
-            return ToolResult.Ok(alarmOpenLine(true, hour, minute, repeat, weekday))
+        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
+        val silent = trySilentClock(hour, minute, message, repeat, weekday)
+        if (alarmSetPath(silent) == AlarmSetPath.SilentClock) {
+            return ToolResult.Ok(spoken)
         }
-        val clockPackage = exported?.packageName
-            ?: handlerPackage(filled)
-            ?: installedClockPackage()
-        if (clockPackage != null && openVisibleAlarm(clockPackage, filled)) {
-            return ToolResult.Ok(alarmOpenLine(false, hour, minute, repeat, weekday))
-        }
-        if (clockPackage != null && startActivity(clockLauncher(clockPackage, filled))) {
-            return ToolResult.Ok("Opening the clock")
-        }
-        return ToolResult.Ok("I couldn't open the clock.")
+        return LocalClockAlarmScheduler(context).schedule(hour, minute, message, repeat, weekday, spoken)
     }
 
     /**
-     * [AlarmClock.ACTION_SET_ALARM] is started only when that activity is exported.
-     * Vivo's BBK Clock often does not export it, so the visible alarm screen is used instead.
+     * Starts [AlarmClock.ACTION_SET_ALARM] only on an exported activity, with
+     * [AlarmClock.EXTRA_SKIP_UI] so the clock saves the alarm without a tap.
+     * Vivo's BBK Clock does not export that activity.
      */
-    private fun setAlarmIntent(
+    private fun trySilentClock(
         hour: Int,
         minute: Int,
         message: String,
         repeat: ReminderRepeat,
         weekday: Int?,
-    ): Intent {
+    ): Boolean {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         alarmDays(repeat, weekday)?.let { intent.putExtra(AlarmClock.EXTRA_DAYS, it) }
-        return intent
-    }
-
-    private fun openVisibleAlarm(packageName: String, filled: Intent): Boolean {
-        val alarmScreen = clockActivities(packageName)
-            .filter { it.exported && alarmActivityScore(it.name) > 0 }
-            .maxByOrNull { alarmActivityScore(it.name) }
-        if (alarmScreen != null) {
-            val intent = Intent()
-                .setComponent(ComponentName(packageName, alarmScreen.name))
-                .putExtras(filled)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (startActivity(intent)) return true
-        }
-        val show = Intent(AlarmClock.ACTION_SHOW_ALARMS)
-            .setPackage(packageName)
-            .putExtras(filled)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        exportedActivity(show)?.let { component ->
-            if (startActivity(Intent(show).setComponent(component))) return true
+        val pm = context.packageManager
+        val activities = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+            .mapNotNull { it.activityInfo }
+            .filter { it.exported }
+            .sortedBy { clockRank(it.packageName) }
+        for (info in activities) {
+            val explicit = Intent(intent).setComponent(ComponentName(info.packageName, info.name))
+            if (startClock(explicit)) return true
         }
         return false
     }
 
-    private fun exportedActivity(intent: Intent): ComponentName? {
-        val matches = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-        val info = matches.firstOrNull { it.activityInfo.exported }?.activityInfo ?: return null
-        return ComponentName(info.packageName, info.name)
+    private fun clockRank(packageName: String): Int = when (packageName) {
+        BBK_CLOCK -> 0
+        "com.google.android.deskclock" -> 1
+        "com.android.deskclock" -> 2
+        else -> 3
     }
 
-    private fun handlerPackage(intent: Intent): String? =
-        context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .firstOrNull()
-            ?.activityInfo
-            ?.packageName
-
-    private fun installedClockPackage(): String? {
-        val pm = context.packageManager
-        if (pm.getLaunchIntentForPackage(BBK_CLOCK) != null) return BBK_CLOCK
-        return null
-    }
-
-    private fun clockActivities(packageName: String): List<android.content.pm.ActivityInfo> {
-        return runCatching {
-            context.packageManager.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES).activities?.toList()
-        }.getOrNull().orEmpty()
-    }
-
-    private fun alarmActivityScore(name: String): Int {
-        val lower = name.lowercase()
-        if (!lower.contains("alarm") || lower.contains("timer")) return 0
-        var score = 1
-        if (lower.contains("set") || lower.contains("add") || lower.contains("create")) score += 3
-        if (lower.contains("list") || lower.contains("main")) score += 1
-        return score
-    }
-
-    private fun clockLauncher(packageName: String, filled: Intent): Intent? {
-        val launch = context.packageManager.getLaunchIntentForPackage(packageName) ?: return null
-        return launch.putExtras(filled).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-
-    private fun startActivity(intent: Intent?): Boolean {
-        if (intent == null) return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun startClock(intent: Intent): Boolean {
         return try {
             context.startActivity(intent)
             true
         } catch (_: SecurityException) {
             false
         } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: RuntimeException) {
             false
         }
     }

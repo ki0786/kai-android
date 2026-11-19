@@ -90,7 +90,7 @@ class PhoneActionsTest {
     fun setAlarmForSixThirtyAmStaysOnDevice() {
         val match = router.match("set an alarm for 6:30 a.m.")
         assertEquals(LocalCommand.SetAlarm(6, 30, "KAI alarm"), match!!.command)
-        assertTrue(match.requiresConfirmation)
+        assertFalse(match.requiresConfirmation)
         assertTrue(match.command.staysOnDevice())
         assertEquals(
             LocalCommand.SetAlarm(18, 30, "KAI alarm"),
@@ -110,8 +110,8 @@ class PhoneActionsTest {
         assertEquals(LocalCommand.SetAlarm(18, 27, "KAI alarm"), match!!.command)
         assertTrue(match.command.staysOnDevice())
         assertEquals("Alarm set for 6:27 p.m.", alarmSpokenLine(18, 27))
-        assertEquals("Alarm set for 6:27 p.m.", alarmOpenLine(openedSetAlarm = true, 18, 27))
-        assertEquals("Opening the clock", alarmOpenLine(openedSetAlarm = false, 18, 27))
+        assertEquals(AlarmSetPath.SilentClock, alarmSetPath(exportedSilentClock = true))
+        assertEquals(AlarmSetPath.AlarmClock, alarmSetPath(exportedSilentClock = false))
     }
 
     @Test

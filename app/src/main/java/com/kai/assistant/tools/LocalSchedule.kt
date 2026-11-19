@@ -400,9 +400,9 @@ class BootScheduleReceiver : BroadcastReceiver() {
 }
 
 /**
- * Clears local alarms left from an older build. New alarms open the clock app.
+ * Rings with [AlarmManager.setAlarmClock] when the device clock has no exported
+ * silent setter. The status bar shows the alarm icon. Nothing is posted as a KAI notice.
  */
-
 class LocalClockAlarmScheduler(private val context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val alarms = context.getSystemService(AlarmManager::class.java)
@@ -424,33 +424,72 @@ class LocalClockAlarmScheduler(private val context: Context) {
     }
 
     fun restore() {
-        all().forEach { cancelPending(it.id) }
-        save(emptyList())
+        val now = System.currentTimeMillis()
+        val kept = mutableListOf<StoredClockAlarm>()
+        all().forEach { alarm ->
+            if (alarm.atMillis <= now) {
+                cancelPending(alarm.id)
+            } else {
+                scheduleOne(alarm)
+                kept += alarm
+            }
+        }
+        save(kept)
     }
 
-    /** Drops a leftover local alarm. The clock app is the alarm, not a KAI notification. */
+    /** Advances a repeating alarm after it rings. A one-time alarm is removed. */
+    fun onFired(id: Int) {
+        val alarm = all().firstOrNull { it.id == id } ?: return
+        if (alarm.atMillis > System.currentTimeMillis() + 15_000) return
+        if (alarm.repeat == ReminderRepeat.Once) {
+            save(all().filterNot { it.id == id })
+            return
+        }
+        val next = nextRepeatMillis(
+            afterMillis = alarm.atMillis,
+            zone = java.time.ZoneId.systemDefault(),
+            hour24 = alarm.hour,
+            minute = alarm.minute,
+            repeat = alarm.repeat,
+            weekday = alarm.weekday,
+        )
+        val updated = alarm.copy(atMillis = next)
+        save(all().map { if (it.id == id) updated else it })
+        scheduleOne(updated)
+    }
+
+    /** Legacy broadcast path. New alarms launch [AlarmRingActivity] directly. */
     fun deliver(id: Int, onSpoken: () -> Unit = {}) {
-        cancelPending(id)
-        save(all().filterNot { it.id == id })
+        val alarm = all().firstOrNull { it.id == id }
+        if (alarm == null) {
+            onSpoken()
+            return
+        }
+        onFired(id)
+        val ring = Intent(context, AlarmRingActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(EXTRA_HOUR, alarm.hour)
+            .putExtra(EXTRA_MINUTE, alarm.minute)
+            .putExtra(EXTRA_ID, -1)
+        try {
+            context.startActivity(ring)
+        } catch (_: RuntimeException) {
+        }
         onSpoken()
     }
 
     private fun scheduleOne(alarm: StoredClockAlarm) {
-        val intent = Intent(context, ClockAlarmReceiver::class.java)
-            .setAction(ACTION_CLOCK)
-            .putExtra(EXTRA_ID, alarm.id)
-        val pending = PendingIntent.getBroadcast(
-            context,
-            5_000 + alarm.id,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        scheduleWake(alarms, alarm.atMillis, pending)
+        val pending = ringPending(alarm, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        try {
+            alarms.setAlarmClock(AlarmManager.AlarmClockInfo(alarm.atMillis, null), pending)
+        } catch (_: SecurityException) {
+            scheduleWake(alarms, alarm.atMillis, pending)
+        }
     }
 
     private fun cancelPending(id: Int) {
-        val intent = Intent(context, ClockAlarmReceiver::class.java).setAction(ACTION_CLOCK)
-        val pending = PendingIntent.getBroadcast(
+        val intent = Intent(context, AlarmRingActivity::class.java).setAction(ACTION_CLOCK)
+        val pending = PendingIntent.getActivity(
             context,
             5_000 + id,
             intent,
@@ -458,6 +497,16 @@ class LocalClockAlarmScheduler(private val context: Context) {
         ) ?: return
         alarms.cancel(pending)
         pending.cancel()
+    }
+
+    private fun ringPending(alarm: StoredClockAlarm, flags: Int): PendingIntent {
+        val intent = Intent(context, AlarmRingActivity::class.java)
+            .setAction(ACTION_CLOCK)
+            .putExtra(EXTRA_ID, alarm.id)
+            .putExtra(EXTRA_HOUR, alarm.hour)
+            .putExtra(EXTRA_MINUTE, alarm.minute)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(context, 5_000 + alarm.id, intent, flags)
     }
 
     private fun all(): List<StoredClockAlarm> {
@@ -504,8 +553,10 @@ class LocalClockAlarmScheduler(private val context: Context) {
 
     companion object {
         const val ACTION_CLOCK = "com.kai.assistant.CLOCK_ALARM"
+        const val EXTRA_ID = "id"
+        const val EXTRA_HOUR = "hour"
+        const val EXTRA_MINUTE = "minute"
         private const val CLOCK_ALARMS = "clock_alarms"
-        private const val EXTRA_ID = "id"
     }
 }
 

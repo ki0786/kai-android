@@ -276,18 +276,16 @@ internal fun alarmSpokenLine(
 internal fun alarmFiredLine(hour24: Int, minute: Int): String =
     "Alarm for ${clockLabel(hour24, minute)}"
 
-/** Spoken line after opening the clock. A KAI notification is not an alarm. */
-internal fun alarmOpenLine(
-    openedSetAlarm: Boolean,
-    hour24: Int,
-    minute: Int,
-    repeat: ReminderRepeat = ReminderRepeat.Once,
-    weekday: Int? = null,
-): String = if (openedSetAlarm) {
-    alarmSpokenLine(hour24, minute, repeat, weekday)
-} else {
-    "Opening the clock"
+internal enum class AlarmSetPath {
+    /** An exported clock activity accepted SET_ALARM with SKIP_UI. */
+    SilentClock,
+    /** [android.app.AlarmManager.setAlarmClock]. Status-bar icon, rings, no confirm step. */
+    AlarmClock,
 }
+
+/** Vivo BBK Clock does not export a silent setter, so the alarm uses [AlarmSetPath.AlarmClock]. */
+internal fun alarmSetPath(exportedSilentClock: Boolean): AlarmSetPath =
+    if (exportedSilentClock) AlarmSetPath.SilentClock else AlarmSetPath.AlarmClock
 
 internal fun clockLabel(hour24: Int, minute: Int): String {
     val h12 = hour24 % 12
