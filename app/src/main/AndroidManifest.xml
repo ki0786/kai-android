@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- On-device contact match for "call <name>". Numbers are not uploaded. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Places the call for one matching contact. Requested at runtime. -->
@@ -137,11 +138,8 @@
             android:name=".tools.AlarmRingActivity"
             android:excludeFromRecents="true"
             android:exported="false"
-            android:launchMode="singleInstance"
-            android:showWhenLocked="true"
-            android:taskAffinity=""
-            android:turnScreenOn="true"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <receiver
             android:name=".tools.ClockAlarmReceiver"
             android:exported="false" />

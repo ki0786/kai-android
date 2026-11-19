@@ -400,8 +400,8 @@ class BootScheduleReceiver : BroadcastReceiver() {
 }
 
 /**
- * Rings with [AlarmManager.setAlarmClock] when the device clock has no exported
- * silent setter. The status bar shows the alarm icon. Nothing is posted as a KAI notice.
+ * Schedules with [AlarmManager.setAlarmClock] in the background.
+ * The status bar shows the alarm icon. No activity is opened.
  */
 class LocalClockAlarmScheduler(private val context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -458,7 +458,7 @@ class LocalClockAlarmScheduler(private val context: Context) {
         scheduleOne(updated)
     }
 
-    /** Legacy broadcast path. New alarms launch [AlarmRingActivity] directly. */
+    /** Rings in the background. Does not open an activity. */
     fun deliver(id: Int, onSpoken: () -> Unit = {}) {
         val alarm = all().firstOrNull { it.id == id }
         if (alarm == null) {
@@ -466,19 +466,12 @@ class LocalClockAlarmScheduler(private val context: Context) {
             return
         }
         onFired(id)
-        val ring = Intent(context, AlarmRingActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(EXTRA_HOUR, alarm.hour)
-            .putExtra(EXTRA_MINUTE, alarm.minute)
-            .putExtra(EXTRA_ID, -1)
-        try {
-            context.startActivity(ring)
-        } catch (_: RuntimeException) {
-        }
+        AlarmRinger.start(context, alarm.hour, alarm.minute)
         onSpoken()
     }
 
     private fun scheduleOne(alarm: StoredClockAlarm) {
+        cancelLegacyActivity(alarm.id)
         val pending = ringPending(alarm, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         try {
             alarms.setAlarmClock(AlarmManager.AlarmClockInfo(alarm.atMillis, null), pending)
@@ -488,6 +481,20 @@ class LocalClockAlarmScheduler(private val context: Context) {
     }
 
     private fun cancelPending(id: Int) {
+        cancelLegacyActivity(id)
+        val intent = Intent(context, ClockAlarmReceiver::class.java).setAction(ACTION_CLOCK)
+        val pending = PendingIntent.getBroadcast(
+            context,
+            5_000 + id,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return
+        alarms.cancel(pending)
+        pending.cancel()
+    }
+
+    /** Older builds fired an activity. Cancel it so a blank screen cannot open. */
+    private fun cancelLegacyActivity(id: Int) {
         val intent = Intent(context, AlarmRingActivity::class.java).setAction(ACTION_CLOCK)
         val pending = PendingIntent.getActivity(
             context,
@@ -500,13 +507,12 @@ class LocalClockAlarmScheduler(private val context: Context) {
     }
 
     private fun ringPending(alarm: StoredClockAlarm, flags: Int): PendingIntent {
-        val intent = Intent(context, AlarmRingActivity::class.java)
+        val intent = Intent(context, ClockAlarmReceiver::class.java)
             .setAction(ACTION_CLOCK)
             .putExtra(EXTRA_ID, alarm.id)
             .putExtra(EXTRA_HOUR, alarm.hour)
             .putExtra(EXTRA_MINUTE, alarm.minute)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        return PendingIntent.getActivity(context, 5_000 + alarm.id, intent, flags)
+        return PendingIntent.getBroadcast(context, 5_000 + alarm.id, intent, flags)
     }
 
     private fun all(): List<StoredClockAlarm> {
@@ -553,6 +559,7 @@ class LocalClockAlarmScheduler(private val context: Context) {
 
     companion object {
         const val ACTION_CLOCK = "com.kai.assistant.CLOCK_ALARM"
+        const val ACTION_STOP = "com.kai.assistant.CLOCK_ALARM_STOP"
         const val EXTRA_ID = "id"
         const val EXTRA_HOUR = "hour"
         const val EXTRA_MINUTE = "minute"
@@ -572,11 +579,15 @@ private data class StoredClockAlarm(
 
 class ClockAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != LocalClockAlarmScheduler.ACTION_CLOCK) return
-        val id = intent.getIntExtra("id", -1)
-        if (id < 0) return
-        val pending = goAsync()
-        LocalClockAlarmScheduler(context).deliver(id) { pending.finish() }
+        when (intent?.action) {
+            LocalClockAlarmScheduler.ACTION_STOP -> AlarmRinger.stop(context)
+            LocalClockAlarmScheduler.ACTION_CLOCK -> {
+                val id = intent.getIntExtra(LocalClockAlarmScheduler.EXTRA_ID, -1)
+                if (id < 0) return
+                val pending = goAsync()
+                LocalClockAlarmScheduler(context).deliver(id) { pending.finish() }
+            }
+        }
     }
 }
 

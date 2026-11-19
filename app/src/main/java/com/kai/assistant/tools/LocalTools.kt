@@ -1,8 +1,6 @@
 package com.kai.assistant.tools
 
 import android.Manifest
-import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -15,7 +13,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
-import android.provider.AlarmClock
 import android.provider.Settings
 import android.widget.Toast
 import java.text.DateFormat
@@ -307,10 +304,6 @@ class LaunchAppTool(private val context: Context) {
 }
 
 class AlarmTimerTool(private val context: Context) {
-    private companion object {
-        const val BBK_CLOCK = "com.android.BBKClock"
-    }
-
     fun setAlarm(
         hour: Int,
         minute: Int,
@@ -319,93 +312,7 @@ class AlarmTimerTool(private val context: Context) {
         weekday: Int? = null,
     ): ToolResult {
         val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
-        val silent = trySilentClock(hour, minute, message, repeat, weekday)
-        if (alarmSetPath(silent) == AlarmSetPath.SilentClock) {
-            return ToolResult.Ok(spoken)
-        }
         return LocalClockAlarmScheduler(context).schedule(hour, minute, message, repeat, weekday, spoken)
-    }
-
-    /**
-     * Starts [AlarmClock.ACTION_SET_ALARM] only on an exported activity, with
-     * [AlarmClock.EXTRA_SKIP_UI] so the clock saves the alarm without a tap.
-     * Vivo's BBK Clock does not export that activity.
-     */
-    private fun trySilentClock(
-        hour: Int,
-        minute: Int,
-        message: String,
-        repeat: ReminderRepeat,
-        weekday: Int?,
-    ): Boolean {
-        val intent = Intent(AlarmClock.ACTION_SET_ALARM)
-            .putExtra(AlarmClock.EXTRA_HOUR, hour)
-            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
-            .putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        alarmDays(repeat, weekday)?.let { intent.putExtra(AlarmClock.EXTRA_DAYS, it) }
-        val pm = context.packageManager
-        val activities = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .mapNotNull { it.activityInfo }
-            .filter { it.exported }
-            .sortedBy { clockRank(it.packageName) }
-        for (info in activities) {
-            val explicit = Intent(intent).setComponent(ComponentName(info.packageName, info.name))
-            if (startClock(explicit)) return true
-        }
-        return false
-    }
-
-    private fun clockRank(packageName: String): Int = when (packageName) {
-        BBK_CLOCK -> 0
-        "com.google.android.deskclock" -> 1
-        "com.android.deskclock" -> 2
-        else -> 3
-    }
-
-    private fun startClock(intent: Intent): Boolean {
-        return try {
-            context.startActivity(intent)
-            true
-        } catch (_: SecurityException) {
-            false
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (_: RuntimeException) {
-            false
-        }
-    }
-
-    private fun alarmDays(repeat: ReminderRepeat, weekday: Int?): java.util.ArrayList<Int>? {
-        val days = when (repeat) {
-            ReminderRepeat.Once -> return null
-            ReminderRepeat.Daily -> listOf(
-                java.util.Calendar.SUNDAY,
-                java.util.Calendar.MONDAY,
-                java.util.Calendar.TUESDAY,
-                java.util.Calendar.WEDNESDAY,
-                java.util.Calendar.THURSDAY,
-                java.util.Calendar.FRIDAY,
-                java.util.Calendar.SATURDAY,
-            )
-            ReminderRepeat.Weekdays -> listOf(
-                java.util.Calendar.MONDAY,
-                java.util.Calendar.TUESDAY,
-                java.util.Calendar.WEDNESDAY,
-                java.util.Calendar.THURSDAY,
-                java.util.Calendar.FRIDAY,
-            )
-            ReminderRepeat.Weekly -> listOf(isoWeekdayToCalendar(weekday ?: java.time.DayOfWeek.MONDAY.value))
-        }
-        return java.util.ArrayList(days)
-    }
-
-    /** ISO Monday=1 … Sunday=7 to [java.util.Calendar] day constants. */
-    private fun isoWeekdayToCalendar(iso: Int): Int = if (iso == 7) {
-        java.util.Calendar.SUNDAY
-    } else {
-        iso + 1
     }
 
     fun startTimer(seconds: Int, message: String): ToolResult {
