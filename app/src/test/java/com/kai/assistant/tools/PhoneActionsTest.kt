@@ -87,6 +87,24 @@ class PhoneActionsTest {
     }
 
     @Test
+    fun setAlarmForSixThirtyAmStaysOnDevice() {
+        val match = router.match("set an alarm for 6:30 a.m.")
+        assertEquals(LocalCommand.SetAlarm(6, 30, "KAI alarm"), match!!.command)
+        assertTrue(match.requiresConfirmation)
+        assertTrue(match.command.staysOnDevice())
+        assertEquals(
+            LocalCommand.SetAlarm(18, 30, "KAI alarm"),
+            router.match("set an alarm for 6:30 p.m.")!!.command,
+        )
+    }
+
+    @Test
+    fun firedAlertsSpeakTheReminderAndTimer() {
+        assertEquals("Reminder. call mohammed kaif", reminderSpokenLine("call mohammed kaif"))
+        assertEquals("Your timer finished.", timerFinishedSpokenLine())
+    }
+
+    @Test
     fun screenDescriptionUsesVisibleTextAndControls() {
         val spoken = describeScreen(
             "Messages",

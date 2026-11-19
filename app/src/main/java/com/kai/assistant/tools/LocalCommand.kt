@@ -71,6 +71,7 @@ fun LocalCommand.staysOnDevice(): Boolean =
     this is LocalCommand.CallContact ||
         this is LocalCommand.SendWhatsApp ||
         this is LocalCommand.WhatsAppCall ||
+        this is LocalCommand.SetAlarm ||
         this is LocalCommand.StartTimer ||
         this is LocalCommand.TakeScreenshot ||
         this is LocalCommand.SetReminder ||

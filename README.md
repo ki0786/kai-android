@@ -92,7 +92,8 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “call Mohammed Kaif on WhatsApp” / “video call Mohammed Kaif on WhatsApp” (WhatsApp call — not sent to the server)
 - “take a screenshot” (saves a picture on the phone; Android asks for screen capture the first time in a session)
 - “set a timer for 5 minutes” (starts a countdown and notifies when it ends — not sent to the server)
-- “remind me to call the supplier at 7” (notification stored on this phone)
+- “set an alarm for 6:30 a.m.” (system clock alarm — not sent to the server)
+- “remind me to call the supplier at 7” (notification stored on this phone; KAI speaks it when it fires)
 - “what’s on my screen” (reads visible text and controls on the phone; says so if accessibility is off)
 
 Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.

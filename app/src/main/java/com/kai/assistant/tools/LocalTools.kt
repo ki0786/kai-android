@@ -264,9 +264,10 @@ class AlarmTimerTool(private val context: Context) {
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return startClockIntent(intent, "Opening alarm UI for $hour:${"%02d".format(minute)}.")
+        val clock = "%d:%02d".format(hour, minute)
+        return startClockIntent(intent, "Alarm set for $clock.")
     }
 
     fun startTimer(seconds: Int, message: String): ToolResult {

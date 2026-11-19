@@ -50,21 +50,29 @@ class TimerScheduler(private val context: Context) {
     }
 
     fun restore() {
-        synchronized(lock) {
+        val speak = synchronized(lock) {
             val end = prefs.getLong(TIMER_END, 0L)
             if (end == 0L) return
-            if (end <= System.currentTimeMillis()) finishLocked() else schedule(end)
+            if (end <= System.currentTimeMillis()) {
+                finishLocked()
+            } else {
+                schedule(end)
+                false
+            }
         }
+        if (speak) SpokenAlert.speak(context, timerFinishedSpokenLine())
     }
 
-    fun finish() {
-        synchronized(lock) { finishLocked() }
+    fun finish(onSpoken: () -> Unit = {}) {
+        val speak = synchronized(lock) { finishLocked() }
+        if (speak) SpokenAlert.speak(context, timerFinishedSpokenLine(), onSpoken) else onSpoken()
     }
 
-    private fun finishLocked() {
-        if (prefs.getLong(TIMER_END, 0L) == 0L) return
+    private fun finishLocked(): Boolean {
+        if (prefs.getLong(TIMER_END, 0L) == 0L) return false
         prefs.edit().remove(TIMER_END).apply()
         notifyDone()
+        return true
     }
 
     private fun schedule(end: Long) {
@@ -181,16 +189,16 @@ class ReminderScheduler(private val context: Context) {
     fun restore() {
         val now = System.currentTimeMillis()
         store.all().forEach { reminder ->
-            if (reminder.atMillis <= now) deliver(reminder) else scheduleOne(reminder)
+            if (reminder.atMillis <= now) deliver(reminder.id, reminder.text) else scheduleOne(reminder)
         }
     }
 
-    fun deliver(id: Int, text: String) {
-        val match = store.all().firstOrNull { it.id == id } ?: StoredReminder(id, text, 0L)
-        deliver(match)
-    }
-
-    private fun deliver(reminder: StoredReminder) {
+    fun deliver(id: Int, text: String, onSpoken: () -> Unit = {}) {
+        val reminder = store.all().firstOrNull { it.id == id }
+        if (reminder == null) {
+            onSpoken()
+            return
+        }
         store.remove(reminder.id)
         ensureChannel(context)
         val open = PendingIntent.getActivity(
@@ -209,6 +217,7 @@ class ReminderScheduler(private val context: Context) {
             .build()
         context.getSystemService(NotificationManager::class.java)
             .notify(8_000 + reminder.id, notification)
+        SpokenAlert.speak(context, reminderSpokenLine(reminder.text.ifBlank { text }), onSpoken)
     }
 
     private fun scheduleOne(reminder: StoredReminder) {
@@ -240,7 +249,8 @@ class ReminderScheduler(private val context: Context) {
 class TimerAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != TimerScheduler.ACTION_TIMER) return
-        TimerScheduler(context).finish()
+        val pending = goAsync()
+        TimerScheduler(context).finish { pending.finish() }
     }
 }
 
@@ -250,7 +260,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         val id = intent.getIntExtra(ReminderScheduler.EXTRA_ID, -1)
         val text = intent.getStringExtra(ReminderScheduler.EXTRA_TEXT).orEmpty()
         if (id < 0 || text.isBlank()) return
-        ReminderScheduler(context).deliver(id, text)
+        val pending = goAsync()
+        ReminderScheduler(context).deliver(id, text) { pending.finish() }
     }
 }
 

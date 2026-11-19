@@ -8,6 +8,7 @@ class LocalIntentRouter {
     fun match(utterance: String): LocalMatch? {
         val text = utterance.trim().lowercase()
             .replace(Regex("[?.!,]+$"), "")
+            .replace(Regex("""\b([ap])\s*\.\s*m\s*\.?(?=\s|$)"""), "$1m")
             .replace(Regex("\\s+"), " ")
             .trim()
         if (text.isBlank()) return null
