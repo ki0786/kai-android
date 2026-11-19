@@ -1,6 +1,9 @@
 package com.kai.assistant.ui.chat
 
 import android.Manifest
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -54,7 +57,10 @@ import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.ScreenReaderAccess
+import com.kai.assistant.tools.ScreenshotCaptureService
 import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.launch
@@ -74,6 +80,9 @@ fun TextChatScreen(
     var contactsRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var callRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var accessRequest by remember { mutableStateOf(0L) }
+    var accessTarget by remember { mutableStateOf(AccessibilityTarget.WhatsAppSend) }
+    var notificationRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
+    var screenshotRequest by remember { mutableStateOf(0L) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -87,7 +96,14 @@ fun TextChatScreen(
                 callRequest = System.nanoTime() to outcome.pending
             }
             is TurnOutcome.NeedsAccessibilitySettings -> {
+                accessTarget = outcome.target
                 accessRequest = System.nanoTime()
+            }
+            is TurnOutcome.NeedsNotificationPermission -> {
+                notificationRequest = System.nanoTime() to outcome.pending
+            }
+            is TurnOutcome.NeedsScreenshotConsent -> {
+                screenshotRequest = System.nanoTime()
             }
             else -> Unit
         }
@@ -141,9 +157,56 @@ fun TextChatScreen(
         }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val match = notificationRequest?.second ?: return@rememberLauncherForActivityResult
+        notificationRequest = null
+        sending = true
+        scope.launch {
+            val outcome = if (granted) {
+                processor.continueAfterNotificationPermission(match)
+            } else {
+                processor.noteNotificationDenied()
+                null
+            }
+            applyCallOutcome(outcome)
+            sending = false
+        }
+    }
+
+    val screenshotConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            ScreenshotCaptureService.grantAndCapture(context, result.resultCode, data)
+        } else {
+            processor.noteScreenshotDenied()
+        }
+    }
+
     LaunchedEffect(accessRequest) {
         if (accessRequest != 0L) {
-            runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
+            val intent = if (accessTarget == AccessibilityTarget.ScreenReader) {
+                ScreenReaderAccess.settingsIntent(context)
+            } else {
+                WhatsAppSendAccess.settingsIntent(context)
+            }
+            runCatching { context.startActivity(intent) }
+        }
+    }
+
+    LaunchedEffect(notificationRequest?.first) {
+        if (notificationRequest != null && Build.VERSION.SDK_INT >= 33) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    LaunchedEffect(screenshotRequest) {
+        if (screenshotRequest != 0L) {
+            val manager = context.getSystemService(MediaProjectionManager::class.java)
+            screenshotConsentLauncher.launch(manager.createScreenCaptureIntent())
         }
     }
 

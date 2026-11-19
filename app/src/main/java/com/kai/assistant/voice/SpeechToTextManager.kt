@@ -2,6 +2,7 @@ package com.kai.assistant.voice
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -12,8 +13,10 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Push-to-talk SpeechRecognizer wrapper. Mic is only active between [startListening]
- * and [stopListening] / [cancel] — never continuous background capture.
+ * Push-to-talk wrapper around the device SpeechRecognizer.
+ * It prefers the on-device recognizer and passes the selected language.
+ * There is no separate noise-reduction model; noisy rooms use the platform recognizer only.
+ * The mic is active only between [startListening] and [stopListening] / [cancel].
  */
 class SpeechToTextManager(
     context: Context,
@@ -27,6 +30,8 @@ class SpeechToTextManager(
     private var recognizer: SpeechRecognizer? = null
     private val listening = AtomicBoolean(false)
     private var languageTag: String = Locale.getDefault().toLanguageTag()
+    private var usingOnDevice = false
+    private var fellBack = false
 
     fun setLanguageTag(tag: String) {
         languageTag = tag
@@ -40,25 +45,26 @@ class SpeechToTextManager(
                 onError("Speech recognition is not available on this device.")
                 return@post
             }
-            ensureRecognizer()
+            ensureRecognizer(preferOnDevice = !fellBack)
             if (!listening.compareAndSet(false, true)) return@post
             onListeningChanged(true)
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-                )
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, appContext.packageName)
-            }
-            runCatching { recognizer?.startListening(intent) }
-                .onFailure {
+            val started = runCatching { recognizer?.startListening(listenIntent()) }
+            if (started.isFailure && usingOnDevice && !fellBack) {
+                fellBack = true
+                runCatching { recognizer?.destroy() }
+                recognizer = null
+                ensureRecognizer(preferOnDevice = false)
+                val retry = runCatching { recognizer?.startListening(listenIntent()) }
+                if (retry.isFailure) {
                     listening.set(false)
                     onListeningChanged(false)
-                    onError(it.message ?: "Could not start listening.")
+                    onError("Speech recognition could not start on this device.")
                 }
+            } else if (started.isFailure) {
+                listening.set(false)
+                onListeningChanged(false)
+                onError("Speech recognition could not start on this device.")
+            }
         }
     }
 
@@ -86,9 +92,36 @@ class SpeechToTextManager(
         }
     }
 
-    private fun ensureRecognizer() {
+    private fun listenIntent(): Intent {
+        return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, languageTag)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, appContext.packageName)
+            // A little more patience between noisy pauses. Still the platform recognizer.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_800L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+            if (usingOnDevice) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        }
+    }
+
+    private fun ensureRecognizer(preferOnDevice: Boolean) {
         if (recognizer != null) return
-        recognizer = SpeechRecognizer.createSpeechRecognizer(appContext).also { sr ->
+        val onDevice = preferOnDevice &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)
+        usingOnDevice = onDevice
+        val created = if (onDevice) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(appContext)
+        }
+        recognizer = created.also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) = Unit
                 override fun onBeginningOfSpeech() = Unit

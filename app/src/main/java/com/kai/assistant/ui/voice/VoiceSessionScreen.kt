@@ -1,7 +1,10 @@
 package com.kai.assistant.ui.voice
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -55,6 +58,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kai.assistant.data.MessageRole
+import com.kai.assistant.tools.AccessibilityTarget
+import com.kai.assistant.tools.ScreenReaderAccess
+import com.kai.assistant.tools.ScreenshotCaptureService
 import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.ui.components.MicStatusChip
 import com.kai.assistant.ui.components.VoiceActivityIndicator
@@ -74,6 +80,9 @@ fun VoiceSessionScreen(
     val contactsRequest by viewModel.contactsPermissionRequest.collectAsStateWithLifecycle()
     val callRequest by viewModel.callPermissionRequest.collectAsStateWithLifecycle()
     val accessRequest by viewModel.accessibilitySettingsRequest.collectAsStateWithLifecycle()
+    val accessTarget by viewModel.accessibilityTarget.collectAsStateWithLifecycle()
+    val notificationRequest by viewModel.notificationPermissionRequest.collectAsStateWithLifecycle()
+    val screenshotRequest by viewModel.screenshotConsentRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -108,9 +117,44 @@ fun VoiceSessionScreen(
         }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onNotificationPermissionResult(granted)
+    }
+
+    val screenshotConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            ScreenshotCaptureService.grantAndCapture(context, result.resultCode, data)
+        } else {
+            viewModel.onScreenshotConsentDenied()
+        }
+    }
+
     LaunchedEffect(accessRequest) {
         if (accessRequest != 0L) {
-            runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
+            val intent = if (accessTarget == AccessibilityTarget.ScreenReader) {
+                ScreenReaderAccess.settingsIntent(context)
+            } else {
+                WhatsAppSendAccess.settingsIntent(context)
+            }
+            runCatching { context.startActivity(intent) }
+        }
+    }
+
+    LaunchedEffect(notificationRequest?.token) {
+        if (notificationRequest != null && Build.VERSION.SDK_INT >= 33) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    LaunchedEffect(screenshotRequest) {
+        if (screenshotRequest != 0L) {
+            val manager = context.getSystemService(MediaProjectionManager::class.java)
+            screenshotConsentLauncher.launch(manager.createScreenCaptureIntent())
         }
     }
 

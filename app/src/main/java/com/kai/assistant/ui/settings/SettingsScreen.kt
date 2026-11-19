@@ -2,6 +2,7 @@ package com.kai.assistant.ui.settings
 
 import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
@@ -46,6 +47,7 @@ import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
 import com.kai.assistant.tools.LocalToolRouter
+import com.kai.assistant.tools.ScreenReaderAccess
 import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.toast
 import com.kai.assistant.ui.components.MicStatus
@@ -82,6 +84,7 @@ fun SettingsScreen(
         Manifest.permission.CALL_PHONE,
     ) == PackageManager.PERMISSION_GRANTED
     val whatsAppSendOn = WhatsAppSendAccess.isEnabled(context)
+    val screenReaderOn = ScreenReaderAccess.isEnabled(context)
 
     Scaffold(
         topBar = {
@@ -170,6 +173,25 @@ fun SettingsScreen(
                     runCatching { context.startActivity(WhatsAppSendAccess.settingsIntent(context)) }
                 },
             ) { Text(if (whatsAppSendOn) "Accessibility settings" else "Turn on WhatsApp send") }
+            Text(
+                text = if (screenReaderOn) "Screen reader: on" else "Screen reader: off",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Used only when you ask what is on the screen. The description stays on this phone.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = {
+                    runCatching { context.startActivity(ScreenReaderAccess.settingsIntent(context)) }
+                },
+            ) { Text(if (screenReaderOn) "Screen reader settings" else "Turn on screen reader") }
+            if (Build.VERSION.SDK_INT >= 33) {
+                TextButton(
+                    onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                ) { Text("Request notifications") }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Language")

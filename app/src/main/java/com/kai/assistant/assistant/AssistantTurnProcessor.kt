@@ -5,6 +5,7 @@ import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
+import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.CallResolution
 import com.kai.assistant.tools.ContactMatcher
 import com.kai.assistant.tools.LocalCommand
@@ -15,6 +16,7 @@ import com.kai.assistant.tools.ToolResult
 import com.kai.assistant.tools.WhatsAppCallResolution
 import com.kai.assistant.tools.messageText
 import com.kai.assistant.tools.WhatsAppResolution
+import com.kai.assistant.tools.needsNotification
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,8 +34,19 @@ sealed class TurnOutcome {
         val explanation: String,
     ) : TurnOutcome()
 
-    /** WhatsApp chat is open. Ask once to enable the send tap. */
-    data class NeedsAccessibilitySettings(val explanation: String) : TurnOutcome()
+    /** Ask once to enable an accessibility service. The chat or reply is already on device. */
+    data class NeedsAccessibilitySettings(
+        val explanation: String,
+        val target: AccessibilityTarget = AccessibilityTarget.WhatsAppSend,
+    ) : TurnOutcome()
+
+    data class NeedsNotificationPermission(
+        val pending: LocalMatch,
+        val explanation: String,
+    ) : TurnOutcome()
+
+    /** First screenshot in this session. Later shots reuse the grant. */
+    data class NeedsScreenshotConsent(val explanation: String) : TurnOutcome()
     data class CloudReady(val reply: String, val offline: Boolean) : TurnOutcome()
 }
 
@@ -126,6 +139,25 @@ class AssistantTurnProcessor(
             is LocalCommand.CallContact -> placeResolvedCall(match, promptForCallPermission = false)
             else -> rememberReady("I couldn't continue that on this phone.", deviceOnly = true)
         }
+    }
+
+    suspend fun continueAfterNotificationPermission(match: LocalMatch): TurnOutcome {
+        if (!tools.notificationsGranted()) {
+            return TurnOutcome.LocalReady(noteNotificationDenied())
+        }
+        return executeLocal(match)
+    }
+
+    fun noteNotificationDenied(): String {
+        val reply = "I can't notify you without notification permission. Nothing was sent to the server."
+        remember(reply, deviceOnly = true)
+        return reply
+    }
+
+    fun noteScreenshotDenied(): String {
+        val reply = "I didn't take a screenshot. Nothing was sent to the server."
+        remember(reply, deviceOnly = true)
+        return reply
     }
 
     fun noteContactsPermissionDenied(command: LocalCommand? = null): String {
@@ -350,16 +382,24 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun executeLocal(match: LocalMatch): TurnOutcome {
+        if (match.command.needsNotification() && !tools.notificationsGranted()) {
+            val explanation = "I need notification permission so I can tell you on this phone. " +
+                "Allow notifications when Android asks. Nothing is sent to the server."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsNotificationPermission(pending = match, explanation = explanation)
+        }
         val result = withContext(Dispatchers.Main) {
             tools.execute(match.command)
         }
         val reply = result.messageText()
         val deviceOnly = match.command.staysOnDevice()
         remember(reply, deviceOnly)
-        if (result is ToolResult.OpenAccessibilitySettings) {
-            return TurnOutcome.NeedsAccessibilitySettings(reply)
+        return when (result) {
+            is ToolResult.OpenAccessibilitySettings ->
+                TurnOutcome.NeedsAccessibilitySettings(reply, result.target)
+            is ToolResult.NeedsScreenshotConsent -> TurnOutcome.NeedsScreenshotConsent(reply)
+            else -> TurnOutcome.LocalReady(reply)
         }
-        return TurnOutcome.LocalReady(reply)
     }
 
     private fun remember(text: String, deviceOnly: Boolean) {

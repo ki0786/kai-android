@@ -7,10 +7,20 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- On-device contact match for "call <name>". Numbers are not uploaded. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Places the call for one matching contact. Requested at runtime. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Timers and reminders notify on this phone. Requested at runtime on Android 13+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Lets an exported clock accept ACTION_SET_ALARM. Granted at install when the clock defines it. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <uses-feature
         android:name="android.hardware.camera.flash"
@@ -44,6 +54,12 @@
         <intent>
             <action android:name="android.intent.action.SET_ALARM" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <package android:name="com.android.BBKClock" />
+        <package android:name="com.google.android.deskclock" />
+        <package android:name="com.android.deskclock" />
         <intent>
             <action android:name="android.intent.action.SET_TIMER" />
         </intent>
@@ -97,5 +113,42 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/whatsapp_send_accessibility" />
         </service>
+        <service
+            android:name=".tools.ScreenReaderAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_reader_accessibility" />
+        </service>
+        <service
+            android:name=".tools.ScreenshotCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <receiver
+            android:name=".tools.TimerAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".tools.ReminderAlarmReceiver"
+            android:exported="false" />
+        <activity
+            android:name=".tools.AlarmRingActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver
+            android:name=".tools.ClockAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".tools.BootScheduleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
