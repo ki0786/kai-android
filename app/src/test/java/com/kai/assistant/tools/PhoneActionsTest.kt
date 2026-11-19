@@ -110,7 +110,8 @@ class PhoneActionsTest {
         assertEquals(LocalCommand.SetAlarm(18, 27, "KAI alarm"), match!!.command)
         assertTrue(match.command.staysOnDevice())
         assertEquals("Alarm set for 6:27 p.m.", alarmSpokenLine(18, 27))
-        assertEquals("Alarm for 6:27 p.m.", alarmFiredLine(18, 27))
+        assertEquals("Alarm set for 6:27 p.m.", alarmOpenLine(openedSetAlarm = true, 18, 27))
+        assertEquals("Opening the clock", alarmOpenLine(openedSetAlarm = false, 18, 27))
     }
 
     @Test

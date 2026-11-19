@@ -276,6 +276,19 @@ internal fun alarmSpokenLine(
 internal fun alarmFiredLine(hour24: Int, minute: Int): String =
     "Alarm for ${clockLabel(hour24, minute)}"
 
+/** Spoken line after opening the clock. A KAI notification is not an alarm. */
+internal fun alarmOpenLine(
+    openedSetAlarm: Boolean,
+    hour24: Int,
+    minute: Int,
+    repeat: ReminderRepeat = ReminderRepeat.Once,
+    weekday: Int? = null,
+): String = if (openedSetAlarm) {
+    alarmSpokenLine(hour24, minute, repeat, weekday)
+} else {
+    "Opening the clock"
+}
+
 internal fun clockLabel(hour24: Int, minute: Int): String {
     val h12 = hour24 % 12
     val hourLabel = if (h12 == 0) 12 else h12

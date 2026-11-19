@@ -400,9 +400,9 @@ class BootScheduleReceiver : BroadcastReceiver() {
 }
 
 /**
- * On-device alarm used when the system clock rejects [android.provider.AlarmClock.ACTION_SET_ALARM].
- * It notifies and speaks. The denial itself is never shown.
+ * Clears local alarms left from an older build. New alarms open the clock app.
  */
+
 class LocalClockAlarmScheduler(private val context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val alarms = context.getSystemService(AlarmManager::class.java)
@@ -424,43 +424,15 @@ class LocalClockAlarmScheduler(private val context: Context) {
     }
 
     fun restore() {
-        val now = System.currentTimeMillis()
-        all().forEach { alarm ->
-            if (alarm.atMillis <= now) deliver(alarm.id) else scheduleOne(alarm)
-        }
+        all().forEach { cancelPending(it.id) }
+        save(emptyList())
     }
 
+    /** Drops a leftover local alarm. The clock app is the alarm, not a KAI notification. */
     fun deliver(id: Int, onSpoken: () -> Unit = {}) {
-        val alarm = all().firstOrNull { it.id == id }
-        if (alarm == null) {
-            onSpoken()
-            return
-        }
-        if (alarm.repeat == ReminderRepeat.Once) {
-            save(all().filterNot { it.id == id })
-        } else {
-            val next = nextRepeatMillis(
-                afterMillis = alarm.atMillis,
-                zone = java.time.ZoneId.systemDefault(),
-                hour24 = alarm.hour,
-                minute = alarm.minute,
-                repeat = alarm.repeat,
-                weekday = alarm.weekday,
-            )
-            val updated = alarm.copy(atMillis = next)
-            save(all().map { if (it.id == id) updated else it })
-            scheduleOne(updated)
-        }
-        ensureChannel(context)
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Alarm")
-            .setContentText(alarmFiredLine(alarm.hour, alarm.minute))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
-        context.getSystemService(NotificationManager::class.java).notify(9_100 + alarm.id, notification)
-        SpokenAlert.speak(context, alarmFiredLine(alarm.hour, alarm.minute), onSpoken)
+        cancelPending(id)
+        save(all().filterNot { it.id == id })
+        onSpoken()
     }
 
     private fun scheduleOne(alarm: StoredClockAlarm) {
@@ -474,6 +446,18 @@ class LocalClockAlarmScheduler(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         scheduleWake(alarms, alarm.atMillis, pending)
+    }
+
+    private fun cancelPending(id: Int) {
+        val intent = Intent(context, ClockAlarmReceiver::class.java).setAction(ACTION_CLOCK)
+        val pending = PendingIntent.getBroadcast(
+            context,
+            5_000 + id,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return
+        alarms.cancel(pending)
+        pending.cancel()
     }
 
     private fun all(): List<StoredClockAlarm> {

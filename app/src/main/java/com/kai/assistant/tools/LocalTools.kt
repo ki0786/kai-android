@@ -307,6 +307,10 @@ class LaunchAppTool(private val context: Context) {
 }
 
 class AlarmTimerTool(private val context: Context) {
+    private companion object {
+        const val BBK_CLOCK = "com.android.BBKClock"
+    }
+
     fun setAlarm(
         hour: Int,
         minute: Int,
@@ -314,32 +318,106 @@ class AlarmTimerTool(private val context: Context) {
         repeat: ReminderRepeat = ReminderRepeat.Once,
         weekday: Int? = null,
     ): ToolResult {
-        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
-        if (tryLaunchClock(hour, minute, message, repeat, weekday)) {
-            return ToolResult.Ok(spoken)
+        val filled = setAlarmIntent(hour, minute, message, repeat, weekday)
+        val exported = exportedActivity(filled)
+        if (exported != null && startActivity(Intent(filled).setComponent(exported))) {
+            return ToolResult.Ok(alarmOpenLine(true, hour, minute, repeat, weekday))
         }
-        return LocalClockAlarmScheduler(context).schedule(hour, minute, message, repeat, weekday, spoken)
+        val clockPackage = exported?.packageName
+            ?: handlerPackage(filled)
+            ?: installedClockPackage()
+        if (clockPackage != null && openVisibleAlarm(clockPackage, filled)) {
+            return ToolResult.Ok(alarmOpenLine(false, hour, minute, repeat, weekday))
+        }
+        if (clockPackage != null && startActivity(clockLauncher(clockPackage, filled))) {
+            return ToolResult.Ok("Opening the clock")
+        }
+        return ToolResult.Ok("I couldn't open the clock.")
     }
 
     /**
-     * Opens the default clock on [AlarmClock.ACTION_SET_ALARM].
-     * Some clocks, including Vivo's, throw SecurityException. That is not shown.
+     * [AlarmClock.ACTION_SET_ALARM] is started only when that activity is exported.
+     * Vivo's BBK Clock often does not export it, so the visible alarm screen is used instead.
      */
-    private fun tryLaunchClock(
+    private fun setAlarmIntent(
         hour: Int,
         minute: Int,
         message: String,
         repeat: ReminderRepeat,
         weekday: Int?,
-    ): Boolean {
+    ): Intent {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
             .putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         alarmDays(repeat, weekday)?.let { intent.putExtra(AlarmClock.EXTRA_DAYS, it) }
-        resolveDefaultAlarm(intent)?.let { intent.component = it }
+        return intent
+    }
+
+    private fun openVisibleAlarm(packageName: String, filled: Intent): Boolean {
+        val alarmScreen = clockActivities(packageName)
+            .filter { it.exported && alarmActivityScore(it.name) > 0 }
+            .maxByOrNull { alarmActivityScore(it.name) }
+        if (alarmScreen != null) {
+            val intent = Intent()
+                .setComponent(ComponentName(packageName, alarmScreen.name))
+                .putExtras(filled)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (startActivity(intent)) return true
+        }
+        val show = Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            .setPackage(packageName)
+            .putExtras(filled)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        exportedActivity(show)?.let { component ->
+            if (startActivity(Intent(show).setComponent(component))) return true
+        }
+        return false
+    }
+
+    private fun exportedActivity(intent: Intent): ComponentName? {
+        val matches = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+        val info = matches.firstOrNull { it.activityInfo.exported }?.activityInfo ?: return null
+        return ComponentName(info.packageName, info.name)
+    }
+
+    private fun handlerPackage(intent: Intent): String? =
+        context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+            .firstOrNull()
+            ?.activityInfo
+            ?.packageName
+
+    private fun installedClockPackage(): String? {
+        val pm = context.packageManager
+        if (pm.getLaunchIntentForPackage(BBK_CLOCK) != null) return BBK_CLOCK
+        return null
+    }
+
+    private fun clockActivities(packageName: String): List<android.content.pm.ActivityInfo> {
+        return runCatching {
+            context.packageManager.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES).activities?.toList()
+        }.getOrNull().orEmpty()
+    }
+
+    private fun alarmActivityScore(name: String): Int {
+        val lower = name.lowercase()
+        if (!lower.contains("alarm") || lower.contains("timer")) return 0
+        var score = 1
+        if (lower.contains("set") || lower.contains("add") || lower.contains("create")) score += 3
+        if (lower.contains("list") || lower.contains("main")) score += 1
+        return score
+    }
+
+    private fun clockLauncher(packageName: String, filled: Intent): Intent? {
+        val launch = context.packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        return launch.putExtras(filled).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    private fun startActivity(intent: Intent?): Boolean {
+        if (intent == null) return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
             context.startActivity(intent)
             true
@@ -348,16 +426,6 @@ class AlarmTimerTool(private val context: Context) {
         } catch (_: ActivityNotFoundException) {
             false
         }
-    }
-
-    private fun resolveDefaultAlarm(intent: Intent): ComponentName? {
-        val pm = context.packageManager
-        val preferred = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        val info = preferred?.activityInfo
-        if (info != null) return ComponentName(info.packageName, info.name)
-        val any = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .firstOrNull { it.activityInfo.exported }
-        return any?.let { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
     }
 
     private fun alarmDays(repeat: ReminderRepeat, weekday: Int?): java.util.ArrayList<Int>? {

@@ -52,6 +52,10 @@
             <action android:name="android.intent.action.SET_ALARM" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <package android:name="com.android.BBKClock" />
+        <intent>
             <action android:name="android.intent.action.SET_TIMER" />
         </intent>
         <intent>
