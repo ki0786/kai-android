@@ -26,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -34,8 +35,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 // Required: capital-M Modifier class (not the modifier package).
 import androidx.compose.ui.Modifier
@@ -47,6 +51,8 @@ import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
 import com.kai.assistant.tools.LocalToolRouter
+import com.kai.assistant.tools.MemoryKind
+import com.kai.assistant.tools.PersonalMemoryStore
 import com.kai.assistant.tools.ScreenReaderAccess
 import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.toast
@@ -66,6 +72,10 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val tools = remember(context) { LocalToolRouter(context) }
+    val memoryStore = remember(context) { PersonalMemoryStore(context.applicationContext) }
+    val memories by memoryStore.memories.collectAsStateWithLifecycle(emptyList())
+    var editingId by remember { mutableLongStateOf(-1L) }
+    var draft by remember { mutableStateOf("") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -241,10 +251,52 @@ fun SettingsScreen(
                 },
             )
             Text(
-                text = "Memory stays off the cloud until you explicitly save something. Sensitive data requires consent.",
+                text = "Memory stays on this phone. A fact is saved only when you ask to remember it. " +
+                    "Secrets are saved only if you explicitly ask. Recent chats can be recalled here too.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (memories.isEmpty()) {
+                Text(
+                    text = "No saved memories yet.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            memories.forEach { memory ->
+                val label = if (memory.kind == MemoryKind.Project) "Project" else "Fact"
+                Text(
+                    text = "$label: ${memory.text}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                if (editingId == memory.id) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Edit memory") },
+                    )
+                    Row {
+                        TextButton(
+                            onClick = {
+                                memoryStore.update(memory.id, draft)
+                                editingId = -1L
+                            },
+                        ) { Text("Save") }
+                        TextButton(onClick = { editingId = -1L }) { Text("Cancel") }
+                    }
+                } else {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                editingId = memory.id
+                                draft = memory.text
+                            },
+                        ) { Text("Edit") }
+                        TextButton(onClick = { memoryStore.delete(memory.id) }) { Text("Delete") }
+                    }
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Appearance")

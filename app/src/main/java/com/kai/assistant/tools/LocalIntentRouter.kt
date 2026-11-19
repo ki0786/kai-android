@@ -27,6 +27,7 @@ class LocalIntentRouter {
         matchReminderEdit(text)?.let { return it }
         matchReminder(text)?.let { return it }
         matchScreen(text)?.let { return it }
+        matchMemory(utterance)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
         matchWhatsApp(text)?.let { return it }
@@ -240,6 +241,28 @@ class LocalIntentRouter {
             requiresConfirmation = true,
             confirmationPrompt = "Start a timer for ${describeDuration(seconds)}?",
             spokenLabel = "Starting a timer",
+        )
+    }
+
+    private fun matchMemory(utterance: String): LocalMatch? {
+        val request = parseMemoryRequest(utterance) ?: return null
+        val command = when (request) {
+            is MemoryRequest.Save -> LocalCommand.SaveMemory(
+                request.text,
+                project = request.kind == MemoryKind.Project,
+            )
+            is MemoryRequest.Delete -> LocalCommand.DeleteMemory(request.query, request.all)
+            is MemoryRequest.Edit -> LocalCommand.EditMemory(request.query, request.text)
+            is MemoryRequest.Search -> LocalCommand.RecallMemory(RecallMode.Search, request.query)
+            MemoryRequest.ListAll -> LocalCommand.RecallMemory(RecallMode.List)
+            MemoryRequest.ListProjects -> LocalCommand.RecallMemory(RecallMode.Projects)
+            MemoryRequest.RecentTalk -> LocalCommand.RecallMemory(RecallMode.Recent)
+        }
+        return LocalMatch(
+            command,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Checking memory",
         )
     }
 
