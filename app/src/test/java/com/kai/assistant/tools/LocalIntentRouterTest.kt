@@ -124,6 +124,29 @@ class LocalIntentRouterTest {
     }
 
     @Test
+    fun whatsAppSendStaysLocalWithoutConfirming() {
+        val send = router.match("send hi to Mohammed Kaif on WhatsApp")
+        assertNotNull(send)
+        assertFalse(send!!.requiresConfirmation)
+        assertEquals(
+            LocalCommand.SendWhatsApp(
+                options = listOf(WhatsAppUtterance.Option("mohammed kaif", "hi")),
+            ),
+            send.command,
+        )
+        assertEquals("Opening WhatsApp to Mohammed Kaif", send.spokenLabel)
+
+        val ordered = router.match("WhatsApp Mohammed Kaif hi")
+        assertFalse(ordered!!.requiresConfirmation)
+        val command = ordered.command as LocalCommand.SendWhatsApp
+        assertEquals("mohammed kaif", command.options.first().nameQuery)
+        assertEquals("hi", command.options.first().message)
+
+        assertEquals(LocalCommand.CallContact(query = "kaif"), router.match("call kaif")!!.command)
+        assertNull(router.match("send hi to mom"))
+    }
+
+    @Test
     fun couldYouCallStillMatchesLocally() {
         val match = router.match("could you phone mom")
         assertNotNull(match)

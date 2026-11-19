@@ -51,6 +51,8 @@
             <action android:name="android.intent.action.CALL" />
             <data android:scheme="tel" />
         </intent>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
     </queries>
 
     <application

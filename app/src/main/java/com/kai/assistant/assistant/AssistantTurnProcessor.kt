@@ -12,6 +12,8 @@ import com.kai.assistant.tools.LocalIntentRouter
 import com.kai.assistant.tools.LocalMatch
 import com.kai.assistant.tools.LocalToolRouter
 import com.kai.assistant.tools.ToolResult
+import com.kai.assistant.tools.WhatsAppResolution
+import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -55,13 +57,16 @@ class AssistantTurnProcessor(
             return TurnOutcome.LocalReady("I didn't catch that. Try again.")
         }
         val match = intentRouter.match(trimmed)
-        val callOnDevice = match?.command is LocalCommand.CallContact
-        ingestUserText(trimmed, deviceOnly = callOnDevice)
+        val onDevice = match?.command?.staysOnDevice() == true
+        ingestUserText(trimmed, deviceOnly = onDevice)
         if (match != null) {
-            // Calls are resolved on the device. No match, several matches, and
-            // permission prompts stay here and never fall through to the backend.
+            // Calls and WhatsApp are resolved on the device. No match, several
+            // matches, and permission prompts never fall through to the backend.
             if (match.command is LocalCommand.CallContact) {
                 return prepareCall(match, requestPermission = true)
+            }
+            if (match.command is LocalCommand.SendWhatsApp) {
+                return prepareWhatsApp(match, requestPermission = true)
             }
             if (match.requiresConfirmation) {
                 return TurnOutcome.NeedsConfirmation(match)
@@ -78,11 +83,21 @@ class AssistantTurnProcessor(
      * Does not add the user utterance again and does not call the backend.
      */
     suspend fun continueCall(match: LocalMatch): TurnOutcome {
-        val command = match.command as? LocalCommand.CallContact
-        if (command != null && !command.rawNumber && !tools.contactsGranted()) {
-            return TurnOutcome.LocalReady(noteContactsPermissionDenied())
+        return when (val command = match.command) {
+            is LocalCommand.SendWhatsApp -> {
+                if (!tools.contactsGranted()) {
+                    return TurnOutcome.LocalReady(noteContactsPermissionDenied(whatsApp = true))
+                }
+                sendResolvedWhatsApp(match)
+            }
+            is LocalCommand.CallContact -> {
+                if (!command.rawNumber && !tools.contactsGranted()) {
+                    return TurnOutcome.LocalReady(noteContactsPermissionDenied())
+                }
+                placeResolvedCall(match, promptForCallPermission = true)
+            }
+            else -> rememberReady("I couldn't continue that on this phone.", deviceOnly = true)
         }
-        return placeResolvedCall(match, promptForCallPermission = true)
     }
 
     /**
@@ -95,8 +110,9 @@ class AssistantTurnProcessor(
         return placeResolvedCall(match, promptForCallPermission = false)
     }
 
-    fun noteContactsPermissionDenied(): String {
-        val reply = "I can't look up contacts without permission, so I didn't place a call. " +
+    fun noteContactsPermissionDenied(whatsApp: Boolean = false): String {
+        val action = if (whatsApp) "open WhatsApp" else "place a call"
+        val reply = "I can't look up contacts without permission, so I didn't $action. " +
             "Allow Contacts for KAI in Settings, or in the system app settings. " +
             "Nothing was sent to the server."
         remember(reply, deviceOnly = true)
@@ -130,6 +146,54 @@ class AssistantTurnProcessor(
         }
 
         return placeResolvedCall(match, promptForCallPermission = requestPermission)
+    }
+
+    private suspend fun prepareWhatsApp(match: LocalMatch, requestPermission: Boolean): TurnOutcome {
+        val command = match.command as? LocalCommand.SendWhatsApp
+            ?: return rememberReady("I couldn't open WhatsApp on this phone.", deviceOnly = true)
+        if (!tools.contactsGranted()) {
+            if (!requestPermission) {
+                return TurnOutcome.LocalReady(noteContactsPermissionDenied(whatsApp = true))
+            }
+            val name = ContactMatcher.displayQuery(command.nameQuery)
+            val explanation = "I need Contacts permission to find $name on this phone so I can open WhatsApp. " +
+                "Allow contacts when Android asks. This stays on the device and is not sent to the server."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsContactsPermission(pending = match, explanation = explanation)
+        }
+        return sendResolvedWhatsApp(match)
+    }
+
+    private suspend fun sendResolvedWhatsApp(match: LocalMatch): TurnOutcome {
+        val command = match.command as? LocalCommand.SendWhatsApp
+            ?: return rememberReady("I couldn't open WhatsApp on this phone.", deviceOnly = true)
+        if (!command.resolvedNumber.isNullOrBlank() && command.resolvedMessage != null) {
+            return executeLocal(match)
+        }
+        val resolution = try {
+            withContext(Dispatchers.IO) { tools.resolveWhatsApp(command) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            WhatsAppResolution.Speak(
+                "I couldn't look up contacts on this phone. Nothing was sent to the server.",
+            )
+        }
+        return when (resolution) {
+            is WhatsAppResolution.Speak -> rememberReady(resolution.message, deviceOnly = true)
+            is WhatsAppResolution.Ready -> executeLocal(
+                match.copy(
+                    command = command.copy(
+                        resolvedNumber = resolution.number,
+                        resolvedName = resolution.displayName,
+                        resolvedMessage = resolution.message,
+                    ),
+                    requiresConfirmation = false,
+                    confirmationPrompt = "",
+                    spokenLabel = "Opening WhatsApp to ${resolution.displayName}",
+                ),
+            )
+        }
     }
 
     private suspend fun placeResolvedCall(
@@ -186,7 +250,7 @@ class AssistantTurnProcessor(
             is ToolResult.Error -> result.message
             is ToolResult.NeedsConfirmation -> result.message
         }
-        val deviceOnly = match.command is LocalCommand.CallContact
+        val deviceOnly = match.command.staysOnDevice()
         remember(reply, deviceOnly)
         return TurnOutcome.LocalReady(reply)
     }

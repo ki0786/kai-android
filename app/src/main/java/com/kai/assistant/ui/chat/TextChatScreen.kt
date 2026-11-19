@@ -54,8 +54,8 @@ import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.data.SessionMessageStore
-import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -157,7 +157,7 @@ fun TextChatScreen(
     pending?.let { match ->
         AlertDialog(
             onDismissRequest = {
-                processor.cancelPendingConfirmation(deviceOnly = match.command is LocalCommand.CallContact)
+                processor.cancelPendingConfirmation(deviceOnly = match.command.staysOnDevice())
                 pending = null
             },
             title = { Text("Confirm action") },
@@ -179,7 +179,7 @@ fun TextChatScreen(
                 TextButton(
                     onClick = {
                         processor.cancelPendingConfirmation(
-                            deviceOnly = match.command is LocalCommand.CallContact,
+                            deviceOnly = match.command.staysOnDevice(),
                         )
                         pending = null
                     },

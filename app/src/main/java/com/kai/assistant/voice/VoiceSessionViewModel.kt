@@ -7,8 +7,8 @@ import com.kai.assistant.KaiApplication
 import com.kai.assistant.assistant.AssistantTurnProcessor
 import com.kai.assistant.assistant.TurnOutcome
 import com.kai.assistant.data.SessionMessageStore
-import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalMatch
+import com.kai.assistant.tools.staysOnDevice
 import com.kai.assistant.ui.components.MicStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -198,7 +198,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     fun cancelPending() {
         val pending = _ui.value.pendingConfirmation ?: return
         processor.cancelPendingConfirmation(
-            deviceOnly = pending.command is LocalCommand.CallContact,
+            deviceOnly = pending.command.staysOnDevice(),
         )
         _ui.update {
             it.copy(

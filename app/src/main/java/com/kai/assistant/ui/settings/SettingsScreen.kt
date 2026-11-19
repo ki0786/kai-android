@@ -131,7 +131,7 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.labelLarge,
             )
             Text(
-                text = "Used only on this phone to match “call <name>”. Numbers are not sent to the server.",
+                text = "Used only on this phone to match “call <name>” and WhatsApp sends. Numbers are not sent to the server.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
