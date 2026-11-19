@@ -20,7 +20,7 @@ object ReminderUtterance {
     )
 
     fun parse(normalizedText: String): Parsed? {
-        val match = form.find(normalizedText.trim()) ?: return null
+        val match = form.find(prepare(normalizedText)) ?: return null
         val text = match.groupValues[1].trim()
         val hour = match.groupValues[2].toIntOrNull() ?: return null
         val minute = match.groupValues[3].toIntOrNull() ?: 0
@@ -28,6 +28,20 @@ object ReminderUtterance {
         if (text.isEmpty() || hour !in 0..23 || minute !in 0..59) return null
         if (meridiem != null && hour !in 1..12) return null
         return Parsed(text, hour, minute, meridiem)
+    }
+
+    /**
+     * Speech often says "6:00 p.m." The router also strips a trailing period,
+     * which leaves "p.m". Fold those into "pm" / "am" before matching.
+     */
+    private fun prepare(raw: String): String {
+        return raw.trim()
+            .replace(Regex("[?.!,]+$"), "")
+            .replace(Regex("""(?i)\b([ap])\s*\.\s*m\s*\.?(?=\s|$)""")) {
+                it.groupValues[1].lowercase() + "m"
+            }
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 }
 

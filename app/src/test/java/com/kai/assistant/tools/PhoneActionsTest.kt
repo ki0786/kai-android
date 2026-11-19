@@ -42,6 +42,23 @@ class PhoneActionsTest {
     }
 
     @Test
+    fun remindMeToCallAtSixPmStaysOnDevice() {
+        val match = router.match("remind me to call Mohammed Kaif at 6:00 p.m.")
+        assertEquals(
+            LocalCommand.SetReminder("call mohammed kaif", 6, 0, "pm"),
+            match!!.command,
+        )
+        assertFalse(match.requiresConfirmation)
+        assertTrue(match.command.staysOnDevice())
+
+        val eleven = Instant.parse("2026-11-19T11:00:00Z").toEpochMilli()
+        assertEquals(
+            Instant.parse("2026-11-19T18:00:00Z").toEpochMilli(),
+            nextReminderMillis(eleven, ZoneId.of("UTC"), 6, 0, "pm"),
+        )
+    }
+
+    @Test
     fun sevenMeansTheNextSevenOClock() {
         val zone = ZoneId.of("UTC")
         val morning = Instant.parse("2026-11-19T06:00:00Z").toEpochMilli()
