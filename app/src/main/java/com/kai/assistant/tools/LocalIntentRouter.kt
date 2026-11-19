@@ -34,6 +34,7 @@ class LocalIntentRouter {
         matchCamera(text)?.let { return it }
         matchWhatsApp(text)?.let { return it }
         matchCall(text)?.let { return it }
+        matchYouTube(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
     }
@@ -407,8 +408,8 @@ class LocalIntentRouter {
             if (query.isBlank()) return null
             return LocalMatch(
                 LocalCommand.OpenMaps(query),
-                requiresConfirmation = true,
-                confirmationPrompt = "Open maps navigation to \"$query\"?",
+                requiresConfirmation = false,
+                confirmationPrompt = "",
                 spokenLabel = "Opening maps",
             )
         }
@@ -417,8 +418,8 @@ class LocalIntentRouter {
             val query = openMaps.groupValues.getOrNull(2)?.trim().orEmpty().ifBlank { "nearby" }
             return LocalMatch(
                 LocalCommand.OpenMaps(query),
-                requiresConfirmation = query != "nearby",
-                confirmationPrompt = if (query == "nearby") "" else "Open maps for \"$query\"?",
+                requiresConfirmation = false,
+                confirmationPrompt = "",
                 spokenLabel = "Opening maps",
             )
         }
@@ -430,8 +431,8 @@ class LocalIntentRouter {
         return if (hit) {
             LocalMatch(
                 LocalCommand.OpenCamera,
-                requiresConfirmation = true,
-                confirmationPrompt = "Open the camera?",
+                requiresConfirmation = false,
+                confirmationPrompt = "",
                 spokenLabel = "Opening camera",
             )
         } else {
@@ -657,9 +658,19 @@ class LocalIntentRouter {
         if (name.startsWith("wifi") || name.startsWith("wi-fi") || name.startsWith("bluetooth")) return null
         return LocalMatch(
             LocalCommand.LaunchAppByName(name),
-            requiresConfirmation = true,
-            confirmationPrompt = "Open the \"$name\" app?",
+            requiresConfirmation = false,
+            confirmationPrompt = "",
             spokenLabel = "Opening $name",
+        )
+    }
+
+    private fun matchYouTube(text: String): LocalMatch? {
+        val query = parseYouTubeSearch(text) ?: return null
+        return LocalMatch(
+            LocalCommand.SearchYouTube(query),
+            requiresConfirmation = false,
+            confirmationPrompt = "",
+            spokenLabel = "Searching YouTube",
         )
     }
 
