@@ -41,6 +41,8 @@ class LocalToolRouter(private val context: Context) {
 
     fun contactsGranted(): Boolean = calls.hasContactsPermission()
 
+    fun callGranted(): Boolean = calls.hasCallPermission()
+
     fun resolveCall(command: LocalCommand.CallContact): CallResolution = calls.resolve(command)
 
     fun execute(command: LocalCommand): ToolResult = when (command) {

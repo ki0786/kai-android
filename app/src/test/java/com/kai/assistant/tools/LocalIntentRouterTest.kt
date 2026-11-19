@@ -62,25 +62,25 @@ class LocalIntentRouterTest {
     }
 
     @Test
-    fun callByNameStaysLocalAndConfirms() {
+    fun callByNameStaysLocalWithoutConfirming() {
         val kaif = router.match("call kaif")
         assertNotNull(kaif)
-        assertTrue(kaif!!.requiresConfirmation)
-        assertEquals("Call Kaif?", kaif.confirmationPrompt)
+        assertFalse(kaif!!.requiresConfirmation)
         assertEquals(LocalCommand.CallContact(query = "kaif"), kaif.command)
+        assertEquals("Calling Kaif", kaif.spokenLabel)
 
         val titled = router.match("call Kaif")
         assertEquals(LocalCommand.CallContact(query = "kaif"), titled!!.command)
-        assertTrue(titled.requiresConfirmation)
+        assertFalse(titled.requiresConfirmation)
 
         val mom = router.match("phone Mom")
         assertEquals(LocalCommand.CallContact(query = "mom"), mom!!.command)
-        assertEquals("Call Mom?", mom.confirmationPrompt)
-        assertTrue(mom.requiresConfirmation)
+        assertEquals("Calling Mom", mom.spokenLabel)
+        assertFalse(mom.requiresConfirmation)
     }
 
     @Test
-    fun sameUtteranceConfirmationSkipsTheDialog() {
+    fun callPhrasesNeverAskForConfirmation() {
         assertFalse(router.match("yes call kaif")!!.requiresConfirmation)
         assertFalse(router.match("yes, call Kaif")!!.requiresConfirmation)
         assertFalse(router.match("call kaif yes")!!.requiresConfirmation)
@@ -88,7 +88,7 @@ class LocalIntentRouterTest {
         assertFalse(router.match("go ahead and call kaif")!!.requiresConfirmation)
 
         val polite = router.match("please call kaif")
-        assertTrue(polite!!.requiresConfirmation)
+        assertFalse(polite!!.requiresConfirmation)
         assertEquals(LocalCommand.CallContact(query = "kaif"), polite.command)
     }
 
@@ -103,7 +103,7 @@ class LocalIntentRouterTest {
             router.match("phone mom at home")!!.command,
         )
         val number = router.match("call +91 98765 43210")
-        assertTrue(number!!.requiresConfirmation)
+        assertFalse(number!!.requiresConfirmation)
         assertEquals(
             LocalCommand.CallContact(
                 query = "+91 98765 43210",
@@ -127,7 +127,7 @@ class LocalIntentRouterTest {
     fun couldYouCallStillMatchesLocally() {
         val match = router.match("could you phone mom")
         assertNotNull(match)
-        assertTrue(match!!.requiresConfirmation)
+        assertFalse(match!!.requiresConfirmation)
         assertEquals(LocalCommand.CallContact(query = "mom"), match.command)
     }
 }

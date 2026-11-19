@@ -51,10 +51,11 @@ You do **not** need the backend for local phone commands (flashlight, battery, v
 | `ACCESS_NETWORK_STATE` | “Am I online?” local tool |
 | `FLASHLIGHT` | Torch via `CameraManager` (hardware permitting) |
 | `READ_CONTACTS` | Match “call <name>” / “phone <name>” on this device. Numbers are not uploaded. |
+| `CALL_PHONE` | Place that call immediately with `ACTION_CALL` after you allow it. The number is not uploaded. |
 
 Mic status is always visible in the UI. There is **no** background / always-on recording and no wake word in this milestone.
 
-Sensitive local actions (calls, launch app, alarm/timer, maps navigation, camera) ask for confirmation in a dialog before running. A phone call is sensitive. “Call Kaif” asks first; “yes, call Kaif” in the same utterance skips that dialog. Calls open the system phone app with `ACTION_DIAL` (no `CALL_PHONE` permission). If the contact is missing or several people match, KAI says so on the phone and does not send the utterance to the backend.
+Sensitive local actions (launch app, alarm/timer, maps navigation, camera) ask for confirmation in a dialog before running. A call to one matching contact starts immediately with `ACTION_CALL` after you allow phone calls — there is no confirm dialog and no extra tap in the dialer. If the contact is missing or several people match, KAI says so on the phone and does not send the utterance to the backend.
 
 ## Run on an emulator
 
@@ -84,7 +85,7 @@ adb shell am start -n com.kai.assistant/.MainActivity
 - “volume up” / “set volume to 40”
 - “set a timer for 60 seconds” (confirms first)
 - “open Chrome” / “navigate to nearest coffee” (confirms first)
-- “call Kaif” / “phone Mom” (confirms, then opens the dialer with that contact’s number — not sent to the server)
+- “call Kaif” / “phone Mom” (places the call immediately — not sent to the server)
 
 Anything that does not match a local command is sent to `POST /v1/chat` with the in-memory session transcript. Offline / HTTP 503 (no provider keys) returns a friendly message; local tools still work.
 

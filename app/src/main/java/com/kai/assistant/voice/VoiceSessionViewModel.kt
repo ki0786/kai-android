@@ -51,6 +51,10 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     val contactsPermissionRequest: StateFlow<ContactsPermissionRequest?> =
         _contactsPermission.asStateFlow()
 
+    private val _callPermission = MutableStateFlow<ContactsPermissionRequest?>(null)
+    val callPermissionRequest: StateFlow<ContactsPermissionRequest?> =
+        _callPermission.asStateFlow()
+
     val messages = SessionMessageStore.messages
 
     val micStatus: StateFlow<MicStatus> = _ui.map { state ->
@@ -177,6 +181,20 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun onCallPermissionResult(granted: Boolean) {
+        val request = _callPermission.value ?: return
+        _callPermission.value = null
+        viewModelScope.launch {
+            _ui.update { it.copy(phase = VoicePhase.Processing) }
+            val outcome = if (granted) {
+                processor.continueAfterCallPermission(request.match)
+            } else {
+                TurnOutcome.LocalReady(processor.noteCallPermissionDenied())
+            }
+            present(outcome)
+        }
+    }
+
     fun cancelPending() {
         val pending = _ui.value.pendingConfirmation ?: return
         processor.cancelPendingConfirmation(
@@ -232,6 +250,13 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             }
             is TurnOutcome.NeedsContactsPermission -> {
                 _contactsPermission.value = ContactsPermissionRequest(
+                    token = System.nanoTime(),
+                    match = outcome.pending,
+                )
+                speakAssistant(outcome.explanation)
+            }
+            is TurnOutcome.NeedsCallPermission -> {
+                _callPermission.value = ContactsPermissionRequest(
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )

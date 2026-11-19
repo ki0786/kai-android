@@ -76,6 +76,10 @@ fun SettingsScreen(
         context,
         Manifest.permission.READ_CONTACTS,
     ) == PackageManager.PERMISSION_GRANTED
+    val callGranted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.CALL_PHONE,
+    ) == PackageManager.PERMISSION_GRANTED
 
     Scaffold(
         topBar = {
@@ -134,6 +138,22 @@ fun SettingsScreen(
             TextButton(
                 onClick = { permissionLauncher.launch(Manifest.permission.READ_CONTACTS) },
             ) { Text("Request contacts") }
+            Text(
+                text = if (callGranted) {
+                    "Phone permission: granted"
+                } else {
+                    "Phone permission: not granted"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Lets KAI start “call <name>” immediately. The number stays on this phone.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { permissionLauncher.launch(Manifest.permission.CALL_PHONE) },
+            ) { Text("Request phone calls") }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Language")

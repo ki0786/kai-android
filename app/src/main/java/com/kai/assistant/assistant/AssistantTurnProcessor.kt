@@ -23,6 +23,10 @@ sealed class TurnOutcome {
         val pending: LocalMatch,
         val explanation: String,
     ) : TurnOutcome()
+    data class NeedsCallPermission(
+        val pending: LocalMatch,
+        val explanation: String,
+    ) : TurnOutcome()
     data class CloudReady(val reply: String, val offline: Boolean) : TurnOutcome()
 }
 
@@ -73,13 +77,35 @@ class AssistantTurnProcessor(
      * Continues a call after the contacts permission dialog.
      * Does not add the user utterance again and does not call the backend.
      */
-    suspend fun continueCall(match: LocalMatch): TurnOutcome =
-        prepareCall(match, requestPermission = false)
+    suspend fun continueCall(match: LocalMatch): TurnOutcome {
+        val command = match.command as? LocalCommand.CallContact
+        if (command != null && !command.rawNumber && !tools.contactsGranted()) {
+            return TurnOutcome.LocalReady(noteContactsPermissionDenied())
+        }
+        return placeResolvedCall(match, promptForCallPermission = true)
+    }
+
+    /**
+     * Continues a call after the phone-call permission dialog and places it immediately.
+     */
+    suspend fun continueAfterCallPermission(match: LocalMatch): TurnOutcome {
+        if (!tools.callGranted()) {
+            return TurnOutcome.LocalReady(noteCallPermissionDenied())
+        }
+        return placeResolvedCall(match, promptForCallPermission = false)
+    }
 
     fun noteContactsPermissionDenied(): String {
         val reply = "I can't look up contacts without permission, so I didn't place a call. " +
             "Allow Contacts for KAI in Settings, or in the system app settings. " +
             "Nothing was sent to the server."
+        remember(reply, deviceOnly = true)
+        return reply
+    }
+
+    fun noteCallPermissionDenied(): String {
+        val reply = "I can't place the call without phone permission. " +
+            "Allow phone calls for KAI in Settings. Nothing was sent to the server."
         remember(reply, deviceOnly = true)
         return reply
     }
@@ -103,6 +129,15 @@ class AssistantTurnProcessor(
             return TurnOutcome.NeedsContactsPermission(pending = match, explanation = explanation)
         }
 
+        return placeResolvedCall(match, promptForCallPermission = requestPermission)
+    }
+
+    private suspend fun placeResolvedCall(
+        match: LocalMatch,
+        promptForCallPermission: Boolean,
+    ): TurnOutcome {
+        val command = match.command as? LocalCommand.CallContact
+            ?: return rememberReady("I couldn't start that call on this phone.", deviceOnly = true)
         val resolution = try {
             withContext(Dispatchers.IO) { tools.resolveCall(command) }
         } catch (cancelled: CancellationException) {
@@ -121,14 +156,22 @@ class AssistantTurnProcessor(
                         resolvedNumber = resolution.number,
                         resolvedName = resolution.displayName,
                     ),
-                    confirmationPrompt = resolution.confirmationPrompt,
+                    requiresConfirmation = false,
+                    confirmationPrompt = "",
                     spokenLabel = "Calling ${resolution.displayName}",
                 )
-                if (ready.requiresConfirmation) {
-                    TurnOutcome.NeedsConfirmation(ready)
-                } else {
-                    executeLocal(ready)
+                if (!tools.callGranted()) {
+                    if (!promptForCallPermission) {
+                        return TurnOutcome.LocalReady(noteCallPermissionDenied())
+                    }
+                    val who = resolution.displayName
+                    val explanation = "I need permission to place the call to $who. " +
+                        "Allow phone calls when Android asks, and the call starts right away. " +
+                        "The number stays on this phone and is not sent to the server."
+                    remember(explanation, deviceOnly = true)
+                    return TurnOutcome.NeedsCallPermission(pending = ready, explanation = explanation)
                 }
+                executeLocal(ready)
             }
         }
     }

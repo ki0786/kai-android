@@ -308,12 +308,10 @@ class LocalIntentRouter {
 
     private fun matchCall(text: String): LocalMatch? {
         val cleaned = text.replace(",", " ").replace(Regex("\\s+"), " ").trim()
-        var confirmed = false
         var rest = cleaned
         while (true) {
             val before = rest
             confirmationPrefix.find(rest)?.let { prefix ->
-                confirmed = true
                 rest = rest.substring(prefix.value.length).trim()
             }
             politePrefix.find(rest)?.let { polite ->
@@ -323,23 +321,17 @@ class LocalIntentRouter {
         }
 
         val stripped = stripTrailingConfirmation(rest)
-        confirmed = confirmed || stripped.confirmed
         val target = extractCallTarget(stripped.target) ?: return null
         val parsed = parseCallTarget(target) ?: return null
         val command = parsed.command
         val label = command.resolvedName ?: ContactMatcher.displayQuery(
             if (command.rawNumber) command.resolvedName ?: command.query else command.query,
         )
-        val prompt = when {
-            command.rawNumber && command.resolvedName != null ->
-                "Call ${command.resolvedName} at ${command.query}?"
-            command.rawNumber -> "Call ${command.query}?"
-            else -> "Call $label?"
-        }
+        // A single match places the call immediately. No confirm dialog.
         return LocalMatch(
             command = command,
-            requiresConfirmation = !(confirmed || parsed.confirmed),
-            confirmationPrompt = prompt,
+            requiresConfirmation = false,
+            confirmationPrompt = "",
             spokenLabel = "Calling $label",
         )
     }

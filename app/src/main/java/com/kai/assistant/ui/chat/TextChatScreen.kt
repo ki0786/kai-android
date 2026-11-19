@@ -71,8 +71,22 @@ fun TextChatScreen(
     var sending by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<LocalMatch?>(null) }
     var contactsRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
+    var callRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    fun applyCallOutcome(outcome: TurnOutcome?) {
+        when (outcome) {
+            is TurnOutcome.NeedsConfirmation -> pending = outcome.match
+            is TurnOutcome.NeedsContactsPermission -> {
+                contactsRequest = System.nanoTime() to outcome.pending
+            }
+            is TurnOutcome.NeedsCallPermission -> {
+                callRequest = System.nanoTime() to outcome.pending
+            }
+            else -> Unit
+        }
+    }
 
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -87,10 +101,25 @@ fun TextChatScreen(
                 processor.noteContactsPermissionDenied()
                 null
             }
-            when (outcome) {
-                is TurnOutcome.NeedsConfirmation -> pending = outcome.match
-                else -> Unit
+            applyCallOutcome(outcome)
+            sending = false
+        }
+    }
+
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val match = callRequest?.second ?: return@rememberLauncherForActivityResult
+        callRequest = null
+        sending = true
+        scope.launch {
+            val outcome = if (granted) {
+                processor.continueAfterCallPermission(match)
+            } else {
+                processor.noteCallPermissionDenied()
+                null
             }
+            applyCallOutcome(outcome)
             sending = false
         }
     }
@@ -98,6 +127,12 @@ fun TextChatScreen(
     LaunchedEffect(contactsRequest?.first) {
         if (contactsRequest != null) {
             contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
+
+    LaunchedEffect(callRequest?.first) {
+        if (callRequest != null) {
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
         }
     }
 
@@ -214,15 +249,7 @@ fun TextChatScreen(
                         draft = ""
                         sending = true
                         scope.launch {
-                            when (val outcome = processor.handleUserText(text)) {
-                                is TurnOutcome.NeedsConfirmation -> pending = outcome.match
-                                is TurnOutcome.NeedsContactsPermission -> {
-                                    contactsRequest = System.nanoTime() to outcome.pending
-                                }
-                                is TurnOutcome.LocalReady,
-                                is TurnOutcome.CloudReady,
-                                -> Unit
-                            }
+                            applyCallOutcome(processor.handleUserText(text))
                             sending = false
                         }
                     },

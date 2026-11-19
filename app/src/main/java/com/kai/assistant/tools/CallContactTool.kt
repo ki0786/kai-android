@@ -20,18 +20,21 @@ sealed class CallResolution {
 }
 
 /**
- * Resolves "call <name>" against the on-device contacts database and hands the
- * number to the system phone app with [Intent.ACTION_DIAL].
- *
- * ACTION_CALL / CALL_PHONE would let KAI place the call itself. That is a more
- * invasive permission than the rest of this app, which hands sensitive actions
- * to system UI. The dialer opens with the number filled in after KAI confirms.
+ * Resolves "call <name>" on the device and places the call with [Intent.ACTION_CALL].
+ * [Manifest.permission.CALL_PHONE] is required so the call starts immediately.
+ * The number is not uploaded.
  */
 class CallContactTool(private val context: Context) {
     fun hasContactsPermission(): Boolean =
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.READ_CONTACTS,
+        ) == PackageManager.PERMISSION_GRANTED
+
+    fun hasCallPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CALL_PHONE,
         ) == PackageManager.PERMISSION_GRANTED
 
     fun resolve(command: LocalCommand.CallContact): CallResolution {
@@ -82,10 +85,10 @@ class CallContactTool(private val context: Context) {
         val number = command.resolvedNumber
         val name = command.resolvedName
         if (!number.isNullOrBlank() && !name.isNullOrBlank()) {
-            return dial(number, name)
+            return placeCall(number, name)
         }
         return when (val resolved = resolve(command)) {
-            is CallResolution.Ready -> dial(resolved.number, resolved.displayName)
+            is CallResolution.Ready -> placeCall(resolved.number, resolved.displayName)
             is CallResolution.Speak -> ToolResult.Ok(resolved.message)
         }
     }
@@ -108,22 +111,30 @@ class CallContactTool(private val context: Context) {
         }
     }
 
-    private fun dial(number: String, displayName: String): ToolResult {
+    private fun placeCall(number: String, displayName: String): ToolResult {
+        if (!hasCallPermission()) {
+            return ToolResult.Error(
+                "I need permission to place the call to $displayName. " +
+                    "Allow phone calls for KAI, then say it again. Nothing was sent to the server.",
+            )
+        }
         val sanitized = sanitizeTel(number)
         if (sanitized.count { it.isDigit() } < 2) {
             return ToolResult.Error("That number for $displayName isn't usable.")
         }
-        val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", sanitized, null))
+        val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", sanitized, null))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
             context.startActivity(intent)
-            ToolResult.Ok(
-                "Opening the phone app to call $displayName at $number. Tap the call button to connect.",
+            ToolResult.Ok("Calling $displayName.")
+        } catch (_: SecurityException) {
+            ToolResult.Error(
+                "I need permission to place the call to $displayName. Nothing was sent to the server.",
             )
         } catch (_: ActivityNotFoundException) {
             ToolResult.Unsupported("No phone app is available to call $displayName.")
         } catch (error: Exception) {
-            ToolResult.Error(error.message ?: "Could not open the phone app to call $displayName.")
+            ToolResult.Error(error.message ?: "Could not place the call to $displayName.")
         }
     }
 

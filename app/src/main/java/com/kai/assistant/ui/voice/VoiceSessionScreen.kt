@@ -71,6 +71,7 @@ fun VoiceSessionScreen(
     val micStatus by viewModel.micStatus.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val contactsRequest by viewModel.contactsPermissionRequest.collectAsStateWithLifecycle()
+    val callRequest by viewModel.callPermissionRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -87,9 +88,21 @@ fun VoiceSessionScreen(
         viewModel.onContactsPermissionResult(granted)
     }
 
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onCallPermissionResult(granted)
+    }
+
     LaunchedEffect(contactsRequest?.token) {
         if (contactsRequest != null) {
             contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
+
+    LaunchedEffect(callRequest?.token) {
+        if (callRequest != null) {
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
         }
     }
 
