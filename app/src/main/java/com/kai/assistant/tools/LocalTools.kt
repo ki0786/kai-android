@@ -37,6 +37,9 @@ sealed class ToolResult {
 
     /** The system screen-capture dialog. Asked on the first screenshot of a session. */
     data class NeedsScreenshotConsent(val message: String) : ToolResult()
+
+    /** The user still has to pick a photo. The image is not uploaded. */
+    data class NeedsPhoto(val message: String, val useBackend: Boolean) : ToolResult()
 }
 
 enum class AccessibilityTarget { WhatsAppSend, ScreenReader }
@@ -108,6 +111,7 @@ class LocalToolRouter(private val context: Context) {
             command.newMeridiem,
         )
         LocalCommand.DescribeScreen -> describeScreen()
+        is LocalCommand.DescribePhoto -> describePhoto(command)
         is LocalCommand.OpenMaps -> openMaps(command.query)
         LocalCommand.OpenCamera -> openCamera()
         is LocalCommand.CallContact -> calls.place(command)
@@ -219,6 +223,12 @@ class LocalToolRouter(private val context: Context) {
             weekday = command.weekday,
         )
     }
+
+    private fun describePhoto(command: LocalCommand.DescribePhoto): ToolResult =
+        ToolResult.NeedsPhoto(
+            message = "Pick a photo. I'll describe it on this phone and I won't upload it.",
+            useBackend = command.useBackend,
+        )
 
     private fun describeScreen(): ToolResult {
         if (!ScreenReaderAccess.isEnabled(context)) {
@@ -473,6 +483,7 @@ fun ToolResult.messageText(): String = when (this) {
     is ToolResult.Error -> message
     is ToolResult.OpenAccessibilitySettings -> message
     is ToolResult.NeedsScreenshotConsent -> message
+    is ToolResult.NeedsPhoto -> message
 }
 
 fun ToolResult.toast(context: Context) {

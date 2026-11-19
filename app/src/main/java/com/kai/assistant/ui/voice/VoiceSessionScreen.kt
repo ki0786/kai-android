@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -84,6 +85,7 @@ fun VoiceSessionScreen(
     val notificationRequest by viewModel.notificationPermissionRequest.collectAsStateWithLifecycle()
     val calendarRequest by viewModel.calendarPermissionRequest.collectAsStateWithLifecycle()
     val screenshotRequest by viewModel.screenshotConsentRequest.collectAsStateWithLifecycle()
+    val photoRequest by viewModel.photoPickRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -163,6 +165,18 @@ fun VoiceSessionScreen(
     LaunchedEffect(notificationRequest?.token) {
         if (notificationRequest != null && Build.VERSION.SDK_INT >= 33) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        viewModel.onPhotoPicked(uri)
+    }
+
+    LaunchedEffect(photoRequest?.first) {
+        if (photoRequest != null) {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
     }
 

@@ -5,6 +5,7 @@ import android.app.Activity
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +90,7 @@ fun TextChatScreen(
     var notificationRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var calendarRequest by remember { mutableStateOf<Pair<Long, LocalMatch>?>(null) }
     var screenshotRequest by remember { mutableStateOf(0L) }
+    var photoRequest by remember { mutableStateOf<Pair<Long, Boolean>?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -113,6 +115,9 @@ fun TextChatScreen(
             }
             is TurnOutcome.NeedsScreenshotConsent -> {
                 screenshotRequest = System.nanoTime()
+            }
+            is TurnOutcome.NeedsPhoto -> {
+                photoRequest = System.nanoTime() to outcome.useBackend
             }
             else -> Unit
         }
@@ -229,6 +234,28 @@ fun TextChatScreen(
     LaunchedEffect(notificationRequest?.first) {
         if (notificationRequest != null && Build.VERSION.SDK_INT >= 33) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val useBackend = photoRequest?.second == true
+        photoRequest = null
+        if (uri == null) {
+            processor.notePhotoCancelled()
+            return@rememberLauncherForActivityResult
+        }
+        sending = true
+        scope.launch {
+            applyCallOutcome(processor.describePickedPhoto(uri, useBackend))
+            sending = false
+        }
+    }
+
+    LaunchedEffect(photoRequest?.first) {
+        if (photoRequest != null) {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
     }
 

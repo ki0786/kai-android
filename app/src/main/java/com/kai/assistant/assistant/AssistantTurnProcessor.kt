@@ -1,6 +1,7 @@
 package com.kai.assistant.assistant
 
 import android.content.Context
+import android.net.Uri
 import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
@@ -21,6 +22,7 @@ import com.kai.assistant.tools.RESEARCH_OFFLINE
 import com.kai.assistant.tools.RESEARCH_UNAVAILABLE
 import com.kai.assistant.tools.formatResearchReply
 import com.kai.assistant.tools.formatResearchSpoken
+import com.kai.assistant.tools.PhotoDescriber
 import com.kai.assistant.tools.PlanStep
 import com.kai.assistant.tools.StepReport
 import com.kai.assistant.tools.needsCalendar
@@ -67,6 +69,12 @@ sealed class TurnOutcome {
 
     /** First screenshot in this session. Later shots reuse the grant. */
     data class NeedsScreenshotConsent(val explanation: String) : TurnOutcome()
+
+    /** Open the photo picker. The image stays on this phone. */
+    data class NeedsPhoto(
+        val explanation: String,
+        val useBackend: Boolean,
+    ) : TurnOutcome()
     data class CloudReady(
         val reply: String,
         val offline: Boolean,
@@ -83,6 +91,7 @@ class AssistantTurnProcessor(
     private val intentRouter: LocalIntentRouter = LocalIntentRouter(),
     private val tools: LocalToolRouter = LocalToolRouter(context.applicationContext),
     private val settingsRepository: SettingsRepository = SettingsRepository(context.applicationContext),
+    private val photos: PhotoDescriber = PhotoDescriber(context.applicationContext),
 ) {
     private val memory get() = tools.memoryStore()
     fun ingestUserText(text: String, deviceOnly: Boolean = false): ChatMessage {
@@ -233,6 +242,19 @@ class AssistantTurnProcessor(
 
     fun noteNotificationDenied(): String {
         val reply = "I can't notify you without notification permission. Nothing was sent to the server."
+        remember(reply, deviceOnly = true)
+        return reply
+    }
+
+    suspend fun describePickedPhoto(uri: Uri, useBackend: Boolean): TurnOutcome {
+        val reply = withContext(Dispatchers.IO) {
+            photos.describe(uri, askedForBackend = useBackend)
+        }
+        return rememberReady(reply, deviceOnly = true)
+    }
+
+    fun notePhotoCancelled(): String {
+        val reply = "I didn't open a photo. Nothing was sent to the server."
         remember(reply, deviceOnly = true)
         return reply
     }
@@ -493,6 +515,7 @@ class AssistantTurnProcessor(
             is ToolResult.OpenAccessibilitySettings ->
                 TurnOutcome.NeedsAccessibilitySettings(reply, result.target)
             is ToolResult.NeedsScreenshotConsent -> TurnOutcome.NeedsScreenshotConsent(reply)
+            is ToolResult.NeedsPhoto -> TurnOutcome.NeedsPhoto(reply, result.useBackend)
             else -> TurnOutcome.LocalReady(reply)
         }
     }
@@ -516,6 +539,10 @@ class AssistantTurnProcessor(
                     remember(result.message, deviceOnly = true)
                     return TurnOutcome.NeedsScreenshotConsent(result.message)
                 }
+                is ToolResult.NeedsPhoto -> {
+                    remember(result.message, deviceOnly = true)
+                    return TurnOutcome.NeedsPhoto(result.message, result.useBackend)
+                }
                 else -> {
                     val ok = !stepFailed(result)
                     val detail = result.messageText()
@@ -538,7 +565,10 @@ class AssistantTurnProcessor(
 
     private fun stepFailed(result: ToolResult): Boolean = when (result) {
         is ToolResult.Ok, is ToolResult.NeedsConfirmation -> false
-        is ToolResult.OpenAccessibilitySettings, is ToolResult.NeedsScreenshotConsent -> false
+        is ToolResult.OpenAccessibilitySettings,
+        is ToolResult.NeedsScreenshotConsent,
+        is ToolResult.NeedsPhoto,
+        -> false
         else -> true
     }
 
