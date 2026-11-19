@@ -187,8 +187,14 @@ object ContactMatcher {
         return 0
     }
 
+    private val spokenFamilies = listOf(
+        setOf("kaif", "kev", "ke", "kef"),
+        setOf("mohamed", "mohammad", "muhammad", "mohammed", "mohamad", "muhammed", "muhamad"),
+    )
+
     private fun tokensClose(query: String, token: String): Boolean {
         if (query == token) return true
+        if (spokenFamilies.any { family -> query in family && token in family }) return true
         if (phoneticKey(query) != phoneticKey(token)) return false
         val distance = editDistance(query, token)
         val limit = when {

@@ -535,6 +535,8 @@ class LocalIntentRouter {
     private fun parseCallTarget(rawTarget: String): ParsedCall? {
         val stripped = stripTrailingConfirmation(rawTarget)
         var target = stripped.target
+            .replace(Regex("""\s+on\s+(?:this|the|my)\s+phone$"""), "")
+            .trim()
         if (target.isBlank()) return null
 
         var phoneType: PhoneKind? = null
