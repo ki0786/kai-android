@@ -112,6 +112,7 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.DeleteMemory -> deleteMemory(command)
         is LocalCommand.EditMemory -> editMemory(command)
         is LocalCommand.RecallMemory -> recallMemory(command)
+        is LocalCommand.RunPlan -> ToolResult.Unsupported("That plan is run by the assistant.")
     }
 
     fun memoryStore(): PersonalMemoryStore = memory

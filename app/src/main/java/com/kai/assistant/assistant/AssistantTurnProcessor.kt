@@ -21,8 +21,15 @@ import com.kai.assistant.tools.RESEARCH_OFFLINE
 import com.kai.assistant.tools.RESEARCH_UNAVAILABLE
 import com.kai.assistant.tools.formatResearchReply
 import com.kai.assistant.tools.formatResearchSpoken
+import com.kai.assistant.tools.PlanStep
+import com.kai.assistant.tools.StepReport
 import com.kai.assistant.tools.needsNotification
+import com.kai.assistant.tools.planIntro
+import com.kai.assistant.tools.planLocalSteps
+import com.kai.assistant.tools.planStepLine
+import com.kai.assistant.tools.planSummary
 import com.kai.assistant.tools.researchQuery
+import com.kai.assistant.tools.shouldRetry
 import com.kai.assistant.tools.staysOnDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -89,10 +96,15 @@ class AssistantTurnProcessor(
         }
         refreshMemoryGate()
         val match = intentRouter.match(trimmed)
-        val onDevice = match?.command?.staysOnDevice() == true
+        val planned = if (match == null) {
+            planLocalSteps(trimmed) { clause -> intentRouter.match(clause) }
+        } else {
+            null
+        }
+        val onDevice = match?.command?.staysOnDevice() == true || planned != null
         ingestUserText(trimmed, deviceOnly = onDevice)
         return try {
-            dispatch(match, trimmed)
+            dispatch(match, trimmed, planned)
         } finally {
             memory.recordTurn(
                 role = "user",
@@ -102,7 +114,11 @@ class AssistantTurnProcessor(
         }
     }
 
-    private suspend fun dispatch(match: LocalMatch?, utterance: String): TurnOutcome {
+    private suspend fun dispatch(
+        match: LocalMatch?,
+        utterance: String,
+        planned: List<PlanStep>?,
+    ): TurnOutcome {
         if (match != null) {
             // Calls and WhatsApp are resolved on the device. No match, several
             // matches, and permission prompts never fall through to the backend.
@@ -119,6 +135,16 @@ class AssistantTurnProcessor(
                 return TurnOutcome.NeedsConfirmation(match)
             }
             return executeLocal(match)
+        }
+        if (!planned.isNullOrEmpty()) {
+            return executeLocal(
+                LocalMatch(
+                    command = LocalCommand.RunPlan(planned),
+                    requiresConfirmation = false,
+                    confirmationPrompt = "",
+                    spokenLabel = "Doing ${planned.size} steps",
+                ),
+            )
         }
         val query = researchQuery(utterance)
         if (query != null) return callResearch(query)
@@ -422,6 +448,9 @@ class AssistantTurnProcessor(
             remember(explanation, deviceOnly = true)
             return TurnOutcome.NeedsNotificationPermission(pending = match, explanation = explanation)
         }
+        if (match.command is LocalCommand.RunPlan) {
+            return runPlan(match.command.steps)
+        }
         val result = withContext(Dispatchers.Main) {
             tools.execute(match.command)
         }
@@ -434,6 +463,51 @@ class AssistantTurnProcessor(
             is ToolResult.NeedsScreenshotConsent -> TurnOutcome.NeedsScreenshotConsent(reply)
             else -> TurnOutcome.LocalReady(reply)
         }
+    }
+
+    private suspend fun runPlan(steps: List<PlanStep>): TurnOutcome {
+        remember(planIntro(steps.size), deviceOnly = true)
+        val reports = mutableListOf<StepReport>()
+        for ((index, step) in steps.withIndex()) {
+            remember(planStepLine(index, steps.size, step.label), deviceOnly = true)
+            var result = runStep(step)
+            if (shouldRetry(failed = stepFailed(result), alreadyRetried = false)) {
+                remember("That step didn't work. Trying once more.", deviceOnly = true)
+                result = runStep(step)
+            }
+            when (result) {
+                is ToolResult.OpenAccessibilitySettings -> {
+                    remember(result.message, deviceOnly = true)
+                    return TurnOutcome.NeedsAccessibilitySettings(result.message, result.target)
+                }
+                is ToolResult.NeedsScreenshotConsent -> {
+                    remember(result.message, deviceOnly = true)
+                    return TurnOutcome.NeedsScreenshotConsent(result.message)
+                }
+                else -> {
+                    val ok = !stepFailed(result)
+                    val detail = result.messageText()
+                    remember(if (ok) "Finished: $detail" else "Failed: $detail", deviceOnly = true)
+                    reports += StepReport(ok = ok, detail = detail)
+                }
+            }
+        }
+        val summary = planSummary(reports)
+        remember(summary, deviceOnly = true)
+        return TurnOutcome.LocalReady(summary)
+    }
+
+    private suspend fun runStep(step: PlanStep): ToolResult {
+        return withContext(Dispatchers.Main) {
+            runCatching { tools.execute(step.command) }
+                .getOrElse { error -> ToolResult.Error(error.message ?: "That step failed.") }
+        }
+    }
+
+    private fun stepFailed(result: ToolResult): Boolean = when (result) {
+        is ToolResult.Ok, is ToolResult.NeedsConfirmation -> false
+        is ToolResult.OpenAccessibilitySettings, is ToolResult.NeedsScreenshotConsent -> false
+        else -> true
     }
 
     private fun remember(text: String, deviceOnly: Boolean) {
