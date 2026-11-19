@@ -88,6 +88,8 @@ sealed class LocalCommand {
         val query: String = "",
     ) : LocalCommand()
 
+    data class RunPlan(val steps: List<PlanStep>) : LocalCommand()
+
     /**
      * Start a WhatsApp voice or video call to one on-device contact.
      * [video] is false for a voice call.
@@ -116,13 +118,18 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.SaveMemory ||
         this is LocalCommand.DeleteMemory ||
         this is LocalCommand.EditMemory ||
-        this is LocalCommand.RecallMemory
+        this is LocalCommand.RecallMemory ||
+        this is LocalCommand.RunPlan
 
-fun LocalCommand.needsNotification(): Boolean =
-    this is LocalCommand.StartTimer ||
-        this is LocalCommand.SetReminder ||
-        this is LocalCommand.SetReminders ||
-        this is LocalCommand.ChangeReminder
+fun LocalCommand.needsNotification(): Boolean = when (this) {
+    is LocalCommand.StartTimer,
+    is LocalCommand.SetReminder,
+    is LocalCommand.SetReminders,
+    is LocalCommand.ChangeReminder,
+    -> true
+    is LocalCommand.RunPlan -> steps.any { it.command.needsNotification() }
+    else -> false
+}
 
 enum class ReminderRepeat { Once, Daily, Weekdays, Weekly }
 
