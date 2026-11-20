@@ -227,12 +227,19 @@ class LocalIntentRouter {
 
     private fun matchTimer(text: String): LocalMatch? {
         val match = Regex(
-            """^set\s+(a\s+|an\s+)?timer\s+(for\s+)?(\d{1,4})\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)?$""" +
+            """^set\s+(?:a\s+|an\s+)?(\d{1,4})\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\s+timer$""" +
+                """|^set\s+(?:a\s+|an\s+)?timer\s+(?:for\s+)?(\d{1,4})\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)?$""" +
                 """|^timer\s+(\d{1,4})\s*(seconds?|secs?|minutes?|mins?)?$""",
         ).find(text) ?: return null
 
-        val amount = (match.groupValues[3].ifBlank { match.groupValues[5] }).toIntOrNull() ?: return null
-        val unit = (match.groupValues[4].ifBlank { match.groupValues[6] }).ifBlank { "seconds" }
+        val amount = sequenceOf(1, 3, 5)
+            .map { match.groupValues[it] }
+            .firstNotNullOfOrNull { it.toIntOrNull() }
+            ?: return null
+        val unit = sequenceOf(2, 4, 6)
+            .map { match.groupValues[it] }
+            .firstOrNull { it.isNotBlank() }
+            ?: "seconds"
         val seconds = when {
             unit.startsWith("hour") || unit.startsWith("hr") -> amount * 3600
             unit.startsWith("min") -> amount * 60

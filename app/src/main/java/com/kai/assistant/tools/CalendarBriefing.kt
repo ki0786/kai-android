@@ -98,7 +98,7 @@ private fun parseRead(text: String, lower: String): CalendarRequest.Read? {
 
 private fun parseAdd(text: String, lower: String): CalendarRequest.Add? {
     val match = Regex(
-        """^(?:please\s+)?(?:add|schedule|create)\s+(?:a\s+|an\s+)?(.+?)\s+(today|tomorrow)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$""",
+        """^(?:please\s+)?(?:add|schedule|create)\s+(?:a\s+|an\s+)?(.+?)\s+(today|tomorrow)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s+(?:called|named|titled)\s+(.+))?$""",
     ).find(lower) ?: return null
     val titleGroup = match.groups[1] ?: return null
     val day = match.groupValues[2]
@@ -107,7 +107,13 @@ private fun parseAdd(text: String, lower: String): CalendarRequest.Add? {
     val meridiem = match.groupValues[5].ifBlank { null }
     if (hour !in 0..23 || minute !in 0..59) return null
     if (meridiem != null && hour !in 1..12) return null
-    val title = if (text.length == lower.length) text.substring(titleGroup.range).trim() else titleGroup.value.trim()
+    val namedGroup = match.groups[6]
+    val titleSource = if (namedGroup != null && namedGroup.value.isNotBlank()) namedGroup else titleGroup
+    val title = if (text.length == lower.length) {
+        text.substring(titleSource.range).trim()
+    } else {
+        titleSource.value.trim()
+    }
     if (title.length < 2) return null
     return CalendarRequest.Add(
         title = title,
