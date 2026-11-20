@@ -188,7 +188,7 @@ object ContactMatcher {
     }
 
     private val spokenFamilies = listOf(
-        setOf("kaif", "kev", "ke", "kef"),
+        setOf("kaif", "kev", "ke", "kef", "cab"),
         setOf("mohamed", "mohammad", "muhammad", "mohammed", "mohamad", "muhammed", "muhamad"),
     )
 
