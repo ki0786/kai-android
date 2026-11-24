@@ -79,6 +79,14 @@ class LocalToolRouter(private val context: Context) {
     fun resolveWhatsAppCall(command: LocalCommand.WhatsAppCall): WhatsAppCallResolution =
         whatsApp.resolveCall(command)
 
+    fun resolveSms(command: LocalCommand.SendSms): WhatsAppResolution {
+        if (command.rawNumber) {
+            val option = command.options.single()
+            return WhatsAppResolution.Ready(option.nameQuery, option.nameQuery, option.message, contactId = -1)
+        }
+        return WhatsAppResolver.resolve(command.options, calls.allPhones(), app = "Messages")
+    }
+
     fun execute(command: LocalCommand): ToolResult = when (command) {
         is LocalCommand.Flashlight -> flashlight.setEnabled(command.enabled)
         LocalCommand.BatteryStatus -> battery.status()
@@ -97,8 +105,13 @@ class LocalToolRouter(private val context: Context) {
             command.message,
             command.repeat,
             command.weekday,
+            command.dayOffset,
+            command.flexible,
         )
         is LocalCommand.StartTimer -> alarms.startTimer(command.seconds, command.message)
+        LocalCommand.CancelTimer -> TimerScheduler(context).cancel()
+        is LocalCommand.OpenSystemSettings -> settings.openSection(command.section)
+        is LocalCommand.SendSms -> openSms(command)
         LocalCommand.TakeScreenshot -> takeScreenshot()
         is LocalCommand.SetReminder -> scheduleReminder(command)
         is LocalCommand.SetReminders -> scheduleReminders(command.items)
@@ -133,6 +146,23 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.ReadSchedule -> calendar.readSchedule(command.dayOffset)
         is LocalCommand.SaveNote -> saveNote(command)
         LocalCommand.DailyBriefing -> briefing.speak()
+    }
+
+    private fun openSms(command: LocalCommand.SendSms): ToolResult {
+        val number = command.resolvedNumber
+            ?: return ToolResult.Error("I need a contact or number to text.")
+        val name = command.resolvedName ?: number
+        val message = command.resolvedMessage ?: command.options.firstOrNull()?.message.orEmpty()
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(ContactMatcher.normalizeNumber(number))))
+            .putExtra("sms_body", message)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            if (intent.resolveActivity(context.packageManager) == null) {
+                return ToolResult.Unsupported("There's no SMS app on this phone.")
+            }
+            context.startActivity(intent)
+            ToolResult.Ok("Opened Messages to $name with your text. Tap send.")
+        }.getOrElse { ToolResult.Error("I couldn't open Messages.") }
     }
 
     private fun saveNote(command: LocalCommand.SaveNote): ToolResult {
@@ -361,15 +391,8 @@ class LaunchAppTool(private val context: Context) {
         val pm = context.packageManager
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = pm.queryIntentActivities(main, PackageManager.MATCH_ALL)
-        val exact = apps.firstOrNull {
-            it.loadLabel(pm).toString().equals(labelQuery, ignoreCase = true)
-        }
-        if (exact != null) return exact.activityInfo.packageName
-
-        val partial = apps.firstOrNull {
-            it.loadLabel(pm).toString().contains(labelQuery, ignoreCase = true)
-        }
-        return partial?.activityInfo?.packageName
+            .map { AppLabel(it.loadLabel(pm).toString(), it.activityInfo.packageName) }
+        return pickApp(labelQuery, apps)
     }
 
     fun searchYouTube(query: String): ToolResult {
@@ -396,6 +419,64 @@ class LaunchAppTool(private val context: Context) {
     }
 }
 
+data class AppLabel(val label: String, val packageName: String)
+
+private val appAliases = mapOf(
+    "insta" to listOf("instagram"),
+    "ig" to listOf("instagram"),
+    "fb" to listOf("facebook"),
+    "yt" to listOf("youtube"),
+    "gpay" to listOf("google pay", "gpay"),
+    "google pay" to listOf("google pay", "gpay"),
+    "phone pe" to listOf("phonepe"),
+    "paytm" to listOf("paytm"),
+    "whatsapp business" to listOf("wa business", "whatsapp business"),
+    "gmail" to listOf("gmail"),
+    "mail" to listOf("gmail", "email"),
+    "email" to listOf("gmail", "email"),
+    "maps" to listOf("maps", "google maps"),
+    "google maps" to listOf("maps"),
+    "play store" to listOf("play store", "google play store"),
+    "playstore" to listOf("play store"),
+    "dialer" to listOf("phone"),
+    "phone" to listOf("phone", "dialer"),
+    "messages" to listOf("messages", "messaging"),
+    "sms" to listOf("messages", "messaging"),
+    "gallery" to listOf("gallery", "photos"),
+    "photos" to listOf("photos", "gallery"),
+    "files" to listOf("files", "file manager", "my files"),
+    "clock" to listOf("clock"),
+    "calculator" to listOf("calculator"),
+    "chrome" to listOf("chrome"),
+    "browser" to listOf("chrome", "browser", "internet"),
+    "music" to listOf("music", "spotify", "youtube music"),
+    "x" to listOf("x", "twitter"),
+    "twitter" to listOf("x", "twitter"),
+)
+
+/**
+ * Exact label, then an alias, then a label that starts with or contains the words,
+ * then the closest-sounding label. "Insta", "whats app" and "spotfy" all open.
+ */
+internal fun pickApp(labelQuery: String, apps: List<AppLabel>): String? {
+    val query = ContactMatcher.normalizeName(labelQuery)
+    if (query.isEmpty() || apps.isEmpty()) return null
+    val compact = query.replace(" ", "")
+    val labelled = apps.map { it to ContactMatcher.normalizeName(it.label) }
+    labelled.firstOrNull { it.second == query || it.second.replace(" ", "") == compact }?.let { return it.first.packageName }
+    appAliases[query]?.forEach { alias ->
+        labelled.firstOrNull { it.second == alias }?.let { return it.first.packageName }
+    }
+    labelled.filter { it.second.startsWith(query) }.minByOrNull { it.second.length }?.let { return it.first.packageName }
+    if (query.length >= 3) {
+        labelled.filter { Regex("""\b${Regex.escape(query)}\b""").containsMatchIn(it.second) }
+            .minByOrNull { it.second.length }
+            ?.let { return it.first.packageName }
+    }
+    val best = labelled.maxByOrNull { ContactMatcher.nameScore(query, it.first.label) } ?: return null
+    return if (ContactMatcher.nameScore(query, best.first.label) >= 0.8) best.first.packageName else null
+}
+
 class AlarmTimerTool(private val context: Context) {
     fun setAlarm(
         hour: Int,
@@ -403,9 +484,19 @@ class AlarmTimerTool(private val context: Context) {
         message: String,
         repeat: ReminderRepeat = ReminderRepeat.Once,
         weekday: Int? = null,
+        dayOffset: Int = 0,
+        flexible: Boolean = false,
     ): ToolResult {
-        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
-        return LocalClockAlarmScheduler(context).schedule(hour, minute, message, repeat, weekday, spoken)
+        val zone = java.time.ZoneId.systemDefault()
+        val hour24 = if (flexible && repeat == ReminderRepeat.Once) {
+            val at = nextReminderMillis(System.currentTimeMillis(), zone, hour, minute, null, dayOffset)
+            java.time.Instant.ofEpochMilli(at).atZone(zone).hour
+        } else {
+            hour
+        }
+        val spoken = alarmSpokenLine(hour24, minute, repeat, weekday) +
+            if (dayOffset == 1 && repeat == ReminderRepeat.Once) " tomorrow" else ""
+        return LocalClockAlarmScheduler(context).schedule(hour24, minute, message, repeat, weekday, spoken, dayOffset)
     }
 
     fun startTimer(seconds: Int, message: String): ToolResult {
@@ -414,8 +505,39 @@ class AlarmTimerTool(private val context: Context) {
 }
 
 class OpenSettingsTool(private val context: Context) {
-    fun openWifi(): ToolResult = open(Settings.ACTION_WIFI_SETTINGS, "Wi‑Fi settings")
-    fun openBluetooth(): ToolResult = open(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth settings")
+    /** Android 10+ blocks apps from switching Wi‑Fi themselves; the quick panel is one tap. */
+    fun openWifi(): ToolResult =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            open(Settings.Panel.ACTION_WIFI, "the Wi‑Fi panel", "Android only lets you flip Wi‑Fi yourself, so tap the switch.")
+        } else {
+            open(Settings.ACTION_WIFI_SETTINGS, "Wi‑Fi settings")
+        }
+
+    fun openBluetooth(): ToolResult = open(
+        Settings.ACTION_BLUETOOTH_SETTINGS,
+        "Bluetooth settings",
+        "Android only lets you flip Bluetooth yourself, so tap the switch.",
+    )
+
+    fun openSection(section: SettingsSection): ToolResult {
+        val action = when (section) {
+            SettingsSection.Main -> Settings.ACTION_SETTINGS
+            SettingsSection.MobileData ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+                else Settings.ACTION_DATA_ROAMING_SETTINGS
+            SettingsSection.Airplane -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+            SettingsSection.Hotspot -> Settings.ACTION_WIRELESS_SETTINGS
+            SettingsSection.Location -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            SettingsSection.DoNotDisturb -> Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS
+            SettingsSection.Display -> Settings.ACTION_DISPLAY_SETTINGS
+            SettingsSection.Sound -> Settings.ACTION_SOUND_SETTINGS
+            SettingsSection.Battery -> Settings.ACTION_BATTERY_SAVER_SETTINGS
+        }
+        val note = if (section == SettingsSection.Main) "" else "Android doesn't let apps change this, so tap the switch."
+        val opened = open(action, section.label, note)
+        if (opened !is ToolResult.Error || section == SettingsSection.Main) return opened
+        return open(Settings.ACTION_SETTINGS, "settings", "I couldn't open ${section.label} directly.")
+    }
     fun openAppDetails(): ToolResult {
         val intent = Intent(
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -427,12 +549,12 @@ class OpenSettingsTool(private val context: Context) {
         }.getOrElse { ToolResult.Error(it.message ?: "Could not open settings.") }
     }
 
-    private fun open(action: String, label: String): ToolResult {
+    private fun open(action: String, label: String, note: String = ""): ToolResult {
         val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching {
             context.startActivity(intent)
-            ToolResult.Ok("Opened $label.")
-        }.getOrElse { ToolResult.Error(it.message ?: "Could not open $label.") }
+            ToolResult.Ok(listOf("Opened $label.", note).filter { it.isNotBlank() }.joinToString(" "))
+        }.getOrElse { ToolResult.Error("Could not open $label.") }
     }
 }
 

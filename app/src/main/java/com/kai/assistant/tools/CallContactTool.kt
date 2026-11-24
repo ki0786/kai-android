@@ -93,22 +93,31 @@ class CallContactTool(private val context: Context) {
         }
     }
 
+    /**
+     * Every saved phone number on this device. Spoken names are matched in memory,
+     * because a SQL LIKE on "kev" never returns "Kaif".
+     */
     fun lookup(query: String): List<ContactPhone> {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
-        val filterResult = runCatching { queryFilter(trimmed) }
-        val fromFilter = filterResult.getOrElse { error ->
-            if (error is SecurityException) throw error
-            emptyList()
+        if (query.isBlank()) return emptyList()
+        return allPhones()
+    }
+
+    fun allPhones(): List<ContactPhone> {
+        val now = System.currentTimeMillis()
+        synchronized(cacheLock) {
+            val cached = cache
+            if (cached != null && now - cachedAt < CACHE_MS) return cached
         }
-        val fromName = runCatching { queryByDisplayName(trimmed) }.getOrElse { error ->
-            if (error is SecurityException) throw error
-            if (filterResult.isFailure) throw error
-            emptyList()
+        val loaded = queryPhones(
+            uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            selection = null,
+            args = null,
+        ).distinctBy { it.contactId to ContactMatcher.normalizeNumber(it.number) }
+        synchronized(cacheLock) {
+            cache = loaded
+            cachedAt = now
         }
-        return (fromFilter + fromName).distinctBy {
-            it.contactId to ContactMatcher.normalizeNumber(it.number)
-        }
+        return loaded
     }
 
     private fun placeCall(number: String, displayName: String): ToolResult {
@@ -137,21 +146,6 @@ class CallContactTool(private val context: Context) {
             ToolResult.Error(error.message ?: "Could not place the call to $displayName.")
         }
     }
-
-    private fun queryFilter(query: String): List<ContactPhone> = queryPhones(
-        uri = Uri.withAppendedPath(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
-            Uri.encode(query),
-        ),
-        selection = null,
-        args = null,
-    )
-
-    private fun queryByDisplayName(query: String): List<ContactPhone> = queryPhones(
-        uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-        selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ? ESCAPE '\\'",
-        args = arrayOf(likeArg(query)),
-    )
 
     private fun queryPhones(
         uri: Uri,
@@ -202,12 +196,11 @@ class CallContactTool(private val context: Context) {
         else -> PhoneKind.Other
     }
 
-    private fun likeArg(query: String): String {
-        val escaped = query
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        return "%$escaped%"
+    private companion object {
+        const val CACHE_MS = 30_000L
+        val cacheLock = Any()
+        var cache: List<ContactPhone>? = null
+        var cachedAt = 0L
     }
 
     private fun sanitizeTel(number: String): String = buildString {

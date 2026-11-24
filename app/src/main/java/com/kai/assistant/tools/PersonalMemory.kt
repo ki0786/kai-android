@@ -315,21 +315,29 @@ private val recentPhrases = setOf(
  */
 class PersonalMemoryStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val _memories = MutableStateFlow(readMemories())
+    private val _memories: MutableStateFlow<List<SavedMemory>> = synchronized(lock) {
+        shared ?: MutableStateFlow(readMemories()).also { shared = it }
+    }
     val memories: StateFlow<List<SavedMemory>> = _memories.asStateFlow()
 
     @Volatile
     var writesEnabled: Boolean = true
 
+    /** Conversation turns are kept only when the user turns chat history on in Settings. */
+    @Volatile
+    var historyEnabled: Boolean = false
+
     fun recordTurn(role: String, text: String, allowSecret: Boolean) {
-        if (!writesEnabled) return
+        if (!writesEnabled || !historyEnabled) return
         if (!shouldPersistTurn(text, allowSecret)) return
-        val turns = readTurns().toMutableList()
-        turns += StoredTurn(System.currentTimeMillis(), role, text.replace("\n", " ").take(500))
-        writeTurns(if (turns.size > MAX_TURNS) turns.takeLast(MAX_TURNS) else turns)
+        synchronized(lock) {
+            val turns = readTurns().toMutableList()
+            turns += StoredTurn(System.currentTimeMillis(), role, text.replace("\n", " ").take(500))
+            writeTurns(if (turns.size > MAX_TURNS) turns.takeLast(MAX_TURNS) else turns)
+        }
     }
 
-    fun save(text: String, kind: MemoryKind): SavedMemory? {
+    fun save(text: String, kind: MemoryKind): SavedMemory? = synchronized(lock) {
         if (!writesEnabled) return null
         val clean = text.trim()
         if (clean.isEmpty()) return null
@@ -345,7 +353,7 @@ class PersonalMemoryStore(context: Context) {
         return saved
     }
 
-    fun update(id: Long, text: String): SavedMemory? {
+    fun update(id: Long, text: String): SavedMemory? = synchronized(lock) {
         val clean = text.trim()
         if (clean.isEmpty()) return null
         var updated: SavedMemory? = null
@@ -358,23 +366,23 @@ class PersonalMemoryStore(context: Context) {
         return updated
     }
 
-    fun delete(id: Long) {
+    fun delete(id: Long) = synchronized(lock) {
         writeMemories(readMemories().filterNot { it.id == id })
     }
 
-    fun deleteAll(): Int {
+    fun deleteAll(): Int = synchronized(lock) {
         val count = readMemories().size
         writeMemories(emptyList())
         return count
     }
 
-    fun deleteMatching(query: String): SavedMemory? {
+    fun deleteMatching(query: String): SavedMemory? = synchronized(lock) {
         val match = bestMemory(readMemories(), query) ?: return null
         delete(match.id)
         return match
     }
 
-    fun editMatching(query: String, text: String): SavedMemory? {
+    fun editMatching(query: String, text: String): SavedMemory? = synchronized(lock) {
         val match = bestMemory(readMemories(), query) ?: return null
         return update(match.id, text)
     }
@@ -438,5 +446,11 @@ class PersonalMemoryStore(context: Context) {
         private const val MEMORIES = "memories"
         private const val TURNS = "turns"
         private const val MAX_TURNS = 100
+
+        /** Every instance reads and writes the same prefs; one lock and one list for all. */
+        private val lock = Any()
+        private var shared: MutableStateFlow<List<SavedMemory>>? = null
     }
+
+    fun clearTurns() = synchronized(lock) { writeTurns(emptyList()) }
 }

@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.BuildConfig
+import com.kai.assistant.api.BackendEndpoint
+import com.kai.assistant.api.BackendLocator
 import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.data.VoiceGender
 import com.kai.assistant.tools.LocalToolRouter
@@ -74,6 +76,11 @@ fun SettingsScreen(
     val tools = remember(context) { LocalToolRouter(context) }
     val memoryStore = remember(context) { PersonalMemoryStore(context.applicationContext) }
     val memories by memoryStore.memories.collectAsStateWithLifecycle(emptyList())
+    val backendEndpoint = remember(context) { BackendEndpoint.get(context) }
+    val backendLocator = remember(context) { BackendLocator(context.applicationContext, backendEndpoint) }
+    val backendUrl by backendEndpoint.url.collectAsStateWithLifecycle()
+    var backendStatus by remember { mutableStateOf("") }
+    var backendSearching by remember { mutableStateOf(false) }
     var editingId by remember { mutableLongStateOf(-1L) }
     var draft by remember { mutableStateOf("") }
 
@@ -276,7 +283,21 @@ fun SettingsScreen(
             )
             Text(
                 text = "Memory stays on this phone. A fact is saved only when you ask to remember it. " +
-                    "Secrets are saved only if you explicitly ask. Recent chats can be recalled here too.",
+                    "Secrets are saved only if you explicitly ask.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingsToggleRow(
+                title = "Keep recent chat history",
+                checked = settings.chatHistoryEnabled,
+                onCheckedChange = { enabled ->
+                    scope.launch { settingsRepository.setChatHistoryEnabled(enabled) }
+                    if (!enabled) memoryStore.clearTurns()
+                },
+            )
+            Text(
+                text = "Off by default. When on, the last 100 lines of your chats stay on this phone " +
+                    "so you can ask \"what did we talk about\". Turning it off deletes them.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -361,23 +382,54 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Backend")
             Text(
-                text = "API base: ${BuildConfig.KAI_API_BASE_URL}",
+                text = "In use: $backendUrl",
                 style = MaterialTheme.typography.labelLarge,
             )
             Text(
-                text = "Keys never ship in the app — only this base URL. Override via local.properties.",
+                text = if (backendUrl == BuildConfig.KAI_API_BASE_URL) {
+                    "From the build (KAI_API_BASE_URL)."
+                } else {
+                    "Found on this Wi‑Fi. Build default: ${BuildConfig.KAI_API_BASE_URL}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "If this address stops answering, KAI looks for the backend on port 8000 " +
+                    "on your current Wi‑Fi and switches to it. Keys never ship in the app.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (backendStatus.isNotEmpty()) {
+                Text(text = backendStatus, style = MaterialTheme.typography.bodyMedium)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    enabled = !backendSearching,
+                    onClick = {
+                        backendSearching = true
+                        backendStatus = "Looking on this Wi‑Fi…"
+                        scope.launch {
+                            val found = backendLocator.rediscover(backendEndpoint.current(), force = true)
+                            backendStatus = found?.let { "Using $it." }
+                                ?: "No KAI backend answered on this Wi‑Fi. Is it running on port 8000?"
+                            backendSearching = false
+                        }
+                    },
+                ) { Text(if (backendSearching) "Searching…" else "Find on this Wi‑Fi") }
+                TextButton(
+                    onClick = {
+                        backendEndpoint.reset()
+                        backendStatus = ""
+                    },
+                ) { Text("Use build address") }
+            }
             TextButton(
                 onClick = {
-                    val intent = Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse(BuildConfig.KAI_API_BASE_URL),
-                    )
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(backendUrl))
                     runCatching { context.startActivity(intent) }
                 },
-            ) { Text("Open base URL") }
+            ) { Text("Open address") }
 
             Spacer(modifier = Modifier.height(24.dp))
         }

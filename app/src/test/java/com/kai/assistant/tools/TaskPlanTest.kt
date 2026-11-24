@@ -17,7 +17,7 @@ class TaskPlanTest {
         assertEquals(2, steps!!.size)
         val timer = steps[0].command as LocalCommand.StartTimer
         assertEquals(120, timer.seconds)
-        assertEquals("Starting a timer", steps[0].label)
+        assertEquals("Starting a timer for 2 minutes", steps[0].label)
         val reminder = steps[1].command as LocalCommand.SetReminder
         assertEquals("stretch", reminder.text)
         assertEquals(8, reminder.hour)

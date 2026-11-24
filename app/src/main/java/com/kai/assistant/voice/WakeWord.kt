@@ -8,7 +8,7 @@ internal data class WakeMatch(val command: String)
  */
 internal fun matchHeyKai(raw: String): WakeMatch? {
     var text = raw.lowercase()
-        .replace(Regex("[^a-z\\s']"), " ")
+        .replace(Regex("[^a-z0-9:.\\s']"), " ")
         .replace(Regex("""\s+"""), " ")
         .trim()
     if (text.isBlank()) return null
@@ -28,5 +28,5 @@ internal const val WAKE_NO_ON_DEVICE =
 internal fun wakeUsesCloudStream(): Boolean = false
 
 private val wakePattern = Regex(
-    """^(?:hey|hi|hay)\s+(?:kai|kye|cai)\b\s*(.*)$""",
+    """^(?:hey|hi|hay|ok|okay)\s+(?:kai|kaai|kye|cai|kay|ky)\b[\s.]*(.*)$""",
 )

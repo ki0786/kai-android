@@ -22,8 +22,29 @@ sealed class LocalCommand {
         val message: String,
         val repeat: ReminderRepeat = ReminderRepeat.Once,
         val weekday: Int? = null,
+        val dayOffset: Int = 0,
+        /** "Set an alarm for 7" with no a.m. or p.m.: ring at the next 7 o'clock. */
+        val flexible: Boolean = false,
     ) : LocalCommand()
     data class StartTimer(val seconds: Int, val message: String) : LocalCommand()
+    data object CancelTimer : LocalCommand()
+    data class OpenSystemSettings(val section: SettingsSection) : LocalCommand()
+
+    /**
+     * Opens the SMS app with [message] ready for [target]. Sending without a tap needs
+     * SEND_SMS, which Google Play limits to default SMS apps.
+     */
+    data class SendSms(
+        val options: List<WhatsAppUtterance.Option>,
+        val resolvedNumber: String? = null,
+        val resolvedName: String? = null,
+        val resolvedMessage: String? = null,
+    ) : LocalCommand() {
+        val nameQuery: String
+            get() = options.firstOrNull()?.nameQuery.orEmpty()
+        val rawNumber: Boolean
+            get() = options.size == 1 && looksLikePhoneNumber(nameQuery)
+    }
     data object TakeScreenshot : LocalCommand()
     data class SetReminder(
         val text: String,
@@ -122,8 +143,32 @@ sealed class LocalCommand {
     ) : LocalCommand()
 }
 
+enum class SettingsSection(val label: String) {
+    Main("settings"),
+    MobileData("mobile data settings"),
+    Airplane("airplane mode settings"),
+    Hotspot("hotspot settings"),
+    Location("location settings"),
+    DoNotDisturb("Do Not Disturb settings"),
+    Display("display settings"),
+    Sound("sound settings"),
+    Battery("battery settings"),
+}
+
 fun LocalCommand.staysOnDevice(): Boolean =
     this is LocalCommand.CallContact ||
+        this is LocalCommand.SendSms ||
+        this is LocalCommand.CancelTimer ||
+        this is LocalCommand.OpenSystemSettings ||
+        this is LocalCommand.Flashlight ||
+        this is LocalCommand.BatteryStatus ||
+        this is LocalCommand.DateTime ||
+        this is LocalCommand.Connectivity ||
+        this is LocalCommand.OpenWifiSettings ||
+        this is LocalCommand.OpenBluetoothSettings ||
+        this is LocalCommand.OpenAppSettings ||
+        this is LocalCommand.SetVolume ||
+        this is LocalCommand.AdjustVolume ||
         this is LocalCommand.SendWhatsApp ||
         this is LocalCommand.WhatsAppCall ||
         this is LocalCommand.SetAlarm ||

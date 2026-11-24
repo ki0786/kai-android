@@ -24,7 +24,7 @@ object ReminderUtterance {
     fun parse(normalizedText: String): Parsed? = parseAll(normalizedText)?.singleOrNull()
 
     fun parseAll(normalizedText: String): List<Parsed>? {
-        val text = prepare(normalizedText)
+        val text = canonical(prepare(normalizedText))
         val body = Regex("""^(?:please\s+)?remind\s+me\s+to\s+(.+)$""").find(text)?.groupValues?.get(1)
             ?: return null
         val parts = body.split(Regex("""\s+and\s+to\s+"""))
@@ -56,15 +56,64 @@ object ReminderUtterance {
         return LocalCommand.ChangeReminder(hour, minute, meridiem, newHour, newMinute, newMeridiem)
     }
 
+    private val timePart = """(?:at\s+)?(?:half\s+past\s+)?(?:\d{1,2}(?::\d{2})?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?:am|pm)?"""
+    private val relativePart = """in\s+\d{1,4}\s+(?:minutes?|mins?|hours?|hrs?)"""
+
+    /**
+     * Rewrites other common orders into "remind me to <task> <when>":
+     * "remind me at 5 to call mom", "remind me in 2 hours to leave",
+     * "set a reminder to pay rent at 9", "remember to call Kaif at 6".
+     */
+    internal fun canonical(text: String): String {
+        var t = text
+        Regex("""^(?:please\s+)?(?:set|create|add|make|put)\s+(?:an?\s+|the\s+)?reminder\s+((?:for\s+)?(?:tomorrow\s+)?$timePart|$relativePart)\s+(?:to|for|that)\s+(.+)$""").find(t)?.let {
+            t = "remind me to ${it.groupValues[2]} ${whenPhrase(it.groupValues[1].removePrefix("for "))}"
+        }
+        Regex("""^(?:please\s+)?(?:set|create|add|make|put)\s+(?:an?\s+|the\s+)?reminder\s+(?:to|for|that)\s+(.+)$""").find(t)?.let {
+            if (!t.startsWith("remind")) t = "remind me to ${it.groupValues[1]}"
+        }
+        Regex("""^remember\s+to\s+(.+?)\s+((?:tomorrow\s+)?(?:at\s+)\S.*|$relativePart)$""").find(t)?.let {
+            t = "remind me to ${it.groupValues[1]} ${it.groupValues[2]}"
+        }
+        Regex("""^(?:please\s+)?remind\s+me\s+about\s+(.+)$""").find(t)?.let { t = "remind me to ${it.groupValues[1]}" }
+        Regex("""^(?:please\s+)?remind\s+me\s+((?:tomorrow\s+)?$timePart(?:\s+tomorrow)?|$relativePart|tomorrow\s+morning|tonight)\s+(?:to|that\s+i\s+(?:need|have)\s+to|about)\s+(.+)$""").find(t)?.let {
+            t = "remind me to ${it.groupValues[2]} ${whenPhrase(it.groupValues[1])}"
+        }
+        return t.replace(Regex("\\s+"), " ").trim()
+    }
+
+    /** "6 pm" -> "at 6 pm", "tomorrow 10" -> "tomorrow at 10"; relative and day words stay. */
+    private fun whenPhrase(raw: String): String {
+        val p = raw.trim()
+        if (p.startsWith("in ") || p.startsWith("at ") || p == "tonight" || p == "tomorrow morning") return p
+        if (p.startsWith("tomorrow ")) {
+            val rest = p.removePrefix("tomorrow ").trim()
+            return "tomorrow " + if (rest.startsWith("at ")) rest else "at $rest"
+        }
+        return "at $p"
+    }
+
     private fun parseClause(raw: String): Parsed? {
         val (clause, repeat, weekday) = stripRepeat(raw)
-        val relative = Regex("""^(.*?)\s+in\s+(\d{1,4})\s+minutes?$""").find(clause)
+        val relative = Regex("""^(.*?)\s+in\s+(\d{1,4})\s+(minutes?|mins?|hours?|hrs?)$""").find(clause)
         if (relative != null) {
             val task = relative.groupValues[1].trim()
-            val minutes = relative.groupValues[2].toIntOrNull() ?: return null
+            val amount = relative.groupValues[2].toIntOrNull() ?: return null
+            val minutes = if (relative.groupValues[3].startsWith("h")) amount * 60 else amount
             if (task.isEmpty() || minutes !in 1..(24 * 60)) return null
             return Parsed(task, 0, 0, null, repeat, weekday, inMinutes = minutes)
         }
+        Regex("""^(.*?)\s+(?:tomorrow\s+at\s+|at\s+)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(\s+tomorrow)?$""").find(clause)
+            ?.takeIf { clause.contains("tomorrow") }
+            ?.let { tomorrow ->
+                val task = tomorrow.groupValues[1].trim()
+                val hour = tomorrow.groupValues[2].toIntOrNull() ?: return null
+                val minute = tomorrow.groupValues[3].toIntOrNull() ?: 0
+                val meridiem = tomorrow.groupValues[4].ifBlank { null }
+                if (task.isEmpty() || hour !in 0..23 || minute !in 0..59) return null
+                if (meridiem != null && hour !in 1..12) return null
+                return Parsed(task, hour, minute, meridiem, repeat, weekday, dayOffset = 1)
+            }
         if (clause.endsWith("tomorrow morning")) {
             val task = clause.removeSuffix("tomorrow morning").trim()
             if (task.isEmpty()) return null
@@ -275,17 +324,6 @@ internal fun alarmSpokenLine(
 
 internal fun alarmFiredLine(hour24: Int, minute: Int): String =
     "Alarm for ${clockLabel(hour24, minute)}"
-
-internal enum class AlarmSetPath {
-    /** An exported clock activity accepted SET_ALARM with SKIP_UI. */
-    SilentClock,
-    /** [android.app.AlarmManager.setAlarmClock]. Status-bar icon, rings, no confirm step. */
-    AlarmClock,
-}
-
-/** Vivo BBK Clock does not export a silent setter, so the alarm uses [AlarmSetPath.AlarmClock]. */
-internal fun alarmSetPath(exportedSilentClock: Boolean): AlarmSetPath =
-    if (exportedSilentClock) AlarmSetPath.SilentClock else AlarmSetPath.AlarmClock
 
 internal fun clockLabel(hour24: Int, minute: Int): String {
     val h12 = hour24 % 12

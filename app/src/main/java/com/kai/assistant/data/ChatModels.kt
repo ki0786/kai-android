@@ -3,6 +3,7 @@ package com.kai.assistant.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 enum class MessageRole { User, Assistant, System }
@@ -28,7 +29,7 @@ object SessionMessageStore {
     fun snapshot(): List<ChatMessage> = _messages.value
 
     fun add(message: ChatMessage) {
-        _messages.value = _messages.value + message
+        _messages.update { it + message }
     }
 
     fun clear() {

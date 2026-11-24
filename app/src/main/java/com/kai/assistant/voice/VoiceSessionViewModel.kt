@@ -271,12 +271,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         _notificationPermission.value = null
         viewModelScope.launch {
             _ui.update { it.copy(phase = VoicePhase.Processing) }
-            val outcome = if (granted) {
-                processor.continueAfterNotificationPermission(request.match)
-            } else {
-                TurnOutcome.LocalReady(processor.noteNotificationDenied())
-            }
-            present(outcome)
+            present(processor.continueAfterNotificationPermission(request.match))
         }
     }
 
@@ -346,8 +341,14 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 partialText = "",
             )
         }
-        viewModelScope.launch { processUtterance(text) }
+        if (turnJob?.isActive == true) {
+            _ui.update { it.copy(statusLine = "Still working on the last request…") }
+            return
+        }
+        turnJob = viewModelScope.launch { processUtterance(text) }
     }
+
+    private var turnJob: kotlinx.coroutines.Job? = null
 
     private suspend fun processUtterance(text: String) {
         turnLanguage = replyLanguage(text, settingsLanguage)

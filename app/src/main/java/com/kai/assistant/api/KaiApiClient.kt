@@ -11,18 +11,21 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
  * HTTP client for the sibling FastAPI backend (`kai-backend`).
- * Base URL from BuildConfig / local.properties (`KAI_API_BASE_URL`).
+ * Base URL from [baseUrl], normally [BackendEndpoint]. When the backend can't be reached
+ * at all, [rediscover] looks for it on the current Wi‑Fi and the request is retried once.
  * Provider API keys stay server-side — never embedded in this app.
  */
 class KaiApiClient(
-    baseUrl: String = BuildConfig.KAI_API_BASE_URL,
+    private val baseUrl: () -> String = { BuildConfig.KAI_API_BASE_URL },
     private val client: OkHttpClient = defaultClient(),
+    private val rediscover: suspend (failedUrl: String) -> String? = { null },
 ) {
-    private val root = baseUrl.trimEnd('/')
+    private val root: String get() = baseUrl().trimEnd('/')
 
     data class HealthResult(
         val ok: Boolean,
@@ -64,17 +67,29 @@ class KaiApiClient(
     /**
      * POST /v1/chat with session transcript. Handles offline + 503 (no provider keys).
      */
-    fun sendChat(sessionId: String, messages: List<ChatMessage>): ChatResult {
+    suspend fun sendChat(sessionId: String, messages: List<ChatMessage>): ChatResult {
         val payload = JSONObject().apply {
             put("session_id", sessionId)
             put("messages", messages.toJsonArray())
         }
+        return withRediscovery({ chatOffline(it) }) { base -> postChat(base, payload) }
+    }
+
+    private fun chatOffline(error: Throwable) = ChatResult(
+        ok = false,
+        reply = "I'm offline right now — couldn't reach the backend " +
+            "(${error.message ?: "network error"}). Local phone commands still work.",
+        code = null,
+        offline = true,
+    )
+
+    private fun postChat(base: String, payload: JSONObject): ChatResult {
         val request = Request.Builder()
-            .url("$root/v1/chat")
+            .url("$base/v1/chat")
             .post(payload.toString().toRequestBody(JSON))
             .build()
 
-        return runCatching {
+        return run {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 when {
@@ -104,27 +119,25 @@ class KaiApiClient(
                     )
                 }
             }
-        }.getOrElse { error ->
-            ChatResult(
-                ok = false,
-                reply = "I'm offline right now — couldn't reach the backend " +
-                    "(${error.message ?: "network error"}). Local phone commands still work.",
-                code = null,
-                offline = true,
-            )
         }
     }
 
     /**
      * POST /v1/research. Sources are only those the backend returns.
      */
-    fun research(query: String): ResearchResult {
+    suspend fun research(query: String): ResearchResult {
         val payload = JSONObject().put("query", query)
+        return withRediscovery({ ResearchResult(ok = false, answer = "", sources = emptyList(), code = null, offline = true) }) { base ->
+            postResearch(base, payload)
+        }
+    }
+
+    private fun postResearch(base: String, payload: JSONObject): ResearchResult {
         val request = Request.Builder()
-            .url("$root/v1/research")
+            .url("$base/v1/research")
             .post(payload.toString().toRequestBody(JSON))
             .build()
-        return runCatching {
+        return run {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
@@ -149,23 +162,38 @@ class KaiApiClient(
                     code = response.code,
                 )
             }
-        }.getOrElse {
-            ResearchResult(
-                ok = false,
-                answer = "",
-                sources = emptyList(),
-                code = null,
-                offline = true,
-            )
         }
     }
 
-    /** @deprecated Prefer [sendChat] with full transcript. */
-    fun sendChatStub(sessionId: String, message: String): ChatResult =
-        sendChat(
-            sessionId = sessionId,
-            messages = listOf(ChatMessage(role = MessageRole.User, text = message)),
-        )
+    /**
+     * Runs [call] against the current base URL. Only a connection failure (no HTTP
+     * answer at all) triggers discovery, and the call is retried once at the new address.
+     */
+    private suspend fun <T> withRediscovery(offline: (Throwable) -> T, call: (String) -> T): T {
+        val first = root
+        val error = try {
+            return call(first)
+        } catch (io: IOException) {
+            io
+        } catch (other: IllegalArgumentException) {
+            return offline(other)
+        }
+        val found = try {
+            rediscover(first)?.trimEnd('/')
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+        if (found.isNullOrBlank() || found == first) return offline(error)
+        return try {
+            call(found)
+        } catch (io: IOException) {
+            offline(io)
+        } catch (other: IllegalArgumentException) {
+            offline(other)
+        }
+    }
 
     fun baseUrl(): String = root
 
@@ -220,6 +248,16 @@ class KaiApiClient(
     }
 
     companion object {
+        /** The app's client: shared saved address plus Wi‑Fi rediscovery. */
+        fun forDevice(context: android.content.Context): KaiApiClient {
+            val endpoint = BackendEndpoint.get(context)
+            val locator = BackendLocator(context.applicationContext, endpoint)
+            return KaiApiClient(
+                baseUrl = { endpoint.current() },
+                rediscover = { failed -> locator.rediscover(failed) },
+            )
+        }
+
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private fun defaultClient(): OkHttpClient {
@@ -227,7 +265,7 @@ class KaiApiClient(
                 level = HttpLoggingInterceptor.Level.BASIC
             }
             return OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
+                .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .addInterceptor(logging)
                 .build()
