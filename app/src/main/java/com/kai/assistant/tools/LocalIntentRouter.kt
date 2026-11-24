@@ -2,64 +2,62 @@ package com.kai.assistant.tools
 
 /**
  * Rule-based utterance → local phone command matcher.
- * Returns null when confidence is low so the cloud path can handle the turn.
+ * Returns null when no phone action fits so the cloud path can handle the turn.
+ * [phoneActionHint] covers commands that look like phone actions but miss a detail.
  */
 class LocalIntentRouter {
     fun match(utterance: String): LocalMatch? {
-        val text = utterance.trim().lowercase()
-            .replace(Regex("[?.!,]+$"), "")
+        val spoken = PhraseNormalizer.clean(utterance)
+        val text = spoken.lowercase()
             .replace(Regex("""\b([ap])\s*\.\s*m\s*\.?(?=\s|$)"""), "$1m")
             .replace(Regex("\\s+"), " ")
             .trim()
         if (text.isBlank()) return null
+        val numeric = digitsForNumberWords(text)
 
         matchFlashlight(text)?.let { return it }
         matchBattery(text)?.let { return it }
         matchDateTime(text)?.let { return it }
         matchConnectivity(text)?.let { return it }
-        matchWifi(text)?.let { return it }
-        matchBluetooth(text)?.let { return it }
-        matchAppSettings(text)?.let { return it }
-        matchVolume(text)?.let { return it }
-        matchAlarm(text)?.let { return it }
-        matchTimer(text)?.let { return it }
+        matchSettings(text)?.let { return it }
+        matchVolume(numeric)?.let { return it }
+        matchTimer(numeric)?.let { return it }
+        matchAlarm(numeric)?.let { return it }
         matchScreenshot(text)?.let { return it }
         matchReminderEdit(text)?.let { return it }
-        matchReminder(text)?.let { return it }
+        matchReminder(numeric)?.let { return it }
         matchScreen(text)?.let { return it }
         matchPhoto(text)?.let { return it }
-        matchCalendar(utterance)?.let { return it }
-        matchMemory(utterance)?.let { return it }
+        matchCalendar(spoken)?.let { return it }
+        matchMemory(spoken)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
-        matchWhatsApp(text)?.let { return it }
+        matchSms(text, spoken)?.let { return it }
+        matchWhatsApp(text, spoken)?.let { return it }
         matchCall(text)?.let { return it }
         matchYouTube(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
     }
 
+    private fun local(command: LocalCommand, label: String) = LocalMatch(
+        command = command,
+        requiresConfirmation = false,
+        confirmationPrompt = "",
+        spokenLabel = label,
+    )
+
     private fun matchFlashlight(text: String): LocalMatch? {
         val mentionsLight = Regex("""\b(flashlight|torch|flash light)\b""").containsMatchIn(text) ||
-            text == "flash on" || text == "flash off" ||
-            text.startsWith("turn on flash") || text.startsWith("turn off flash")
+            Regex("""^(?:turn|switch)\s+(?:on|off)\s+(?:the\s+)?flash$|^flash\s+(?:on|off)$|^(?:turn|switch)\s+(?:the\s+)?flash\s+(?:on|off)$""")
+                .containsMatchIn(text)
         if (!mentionsLight) return null
 
-        val wantsOff = Regex("""\b(off|disable|kill)\b""").containsMatchIn(text)
-        val wantsOn = Regex("""\b(on|enable)\b""").containsMatchIn(text)
+        val wantsOff = Regex("""\b(off|disable|kill|stop)\b""").containsMatchIn(text)
+        val wantsOn = Regex("""\b(on|enable|start)\b""").containsMatchIn(text)
         return when {
-            wantsOff -> LocalMatch(
-                LocalCommand.Flashlight(false),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Turning flashlight off",
-            )
-            wantsOn -> LocalMatch(
-                LocalCommand.Flashlight(true),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Turning flashlight on",
-            )
+            wantsOff -> local(LocalCommand.Flashlight(false), "Turning flashlight off")
+            wantsOn -> local(LocalCommand.Flashlight(true), "Turning flashlight on")
             else -> null
         }
     }
@@ -68,200 +66,182 @@ class LocalIntentRouter {
         if (!Regex("""\b(battery|charging|charge level|power left)\b""").containsMatchIn(text)) {
             return null
         }
-        if (Regex("""\b(set|change|open)\b""").containsMatchIn(text)) return null
-        return LocalMatch(
-            LocalCommand.BatteryStatus,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Checking battery",
-        )
+        if (Regex("""\b(set|change|open|settings|saver)\b""").containsMatchIn(text)) return null
+        return local(LocalCommand.BatteryStatus, "Checking battery")
     }
 
     private fun matchDateTime(text: String): LocalMatch? {
         val hit = Regex(
-            """^(what('?s| is)?\s+)?(the\s+)?(current\s+)?(date|time)(\s+(is it|now))?$""" +
-                """|^what time is it$|^what('?s| is) today'?s date$|^tell me the (time|date)$""",
+            """^(?:what(?:'?s| is)?\s+)?(?:the\s+)?(?:current\s+)?(?:date|time|day)(?:\s+(?:is it|now|today|right now|please))*$""" +
+                """|^what (?:time|day|date) is it(?:\s+(?:now|today|right now))?$""" +
+                """|^what(?:'?s| is) (?:today'?s date|the date today|today)$|^(?:tell me|say) the (?:time|date)$""" +
+                """|^which day is (?:it|today)$|^today'?s date$|^time now$|^what day of the week is it$""",
         ).containsMatchIn(text)
-        return if (hit) {
-            LocalMatch(
-                LocalCommand.DateTime,
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Checking date and time",
-            )
-        } else {
-            null
-        }
+        return if (hit) local(LocalCommand.DateTime, "Checking date and time") else null
     }
 
     private fun matchConnectivity(text: String): LocalMatch? {
         val hit = Regex(
             """\b(am i (online|connected)|check (internet|connectivity|connection)|""" +
-                """(internet|network) (status|connection)|are we online)\b""",
+                """(internet|network) (status|connection)|are we online|is (the )?internet working)\b""",
         ).containsMatchIn(text)
-        return if (hit) {
-            LocalMatch(
-                LocalCommand.Connectivity,
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Checking connectivity",
-            )
-        } else {
-            null
+        return if (hit) local(LocalCommand.Connectivity, "Checking connectivity") else null
+    }
+
+    private val toggleWords = Regex(
+        """\b(open|show|launch|settings|turn|switch|enable|disable|on|off|connect|disconnect|start|stop|""" +
+            """increase|decrease|reduce|raise|lower|change|set|adjust)\b""",
+    )
+
+    private fun matchSettings(text: String): LocalMatch? {
+        if (Regex("""\b(wi-?fi|wifi)\b""").containsMatchIn(text) && toggleWords.containsMatchIn(text)) {
+            return local(LocalCommand.OpenWifiSettings, "Opening Wi‑Fi settings")
         }
-    }
-
-    private fun matchWifi(text: String): LocalMatch? {
-        if (!Regex("""\b(wi-?fi|wifi)\b""").containsMatchIn(text)) return null
-        if (!Regex("""\b(open|show|launch|settings)\b""").containsMatchIn(text)) return null
-        return LocalMatch(
-            LocalCommand.OpenWifiSettings,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Opening Wi‑Fi settings",
-        )
-    }
-
-    private fun matchBluetooth(text: String): LocalMatch? {
-        if (!text.contains("bluetooth")) return null
-        if (!Regex("""\b(open|show|launch|settings)\b""").containsMatchIn(text)) return null
-        return LocalMatch(
-            LocalCommand.OpenBluetoothSettings,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Opening Bluetooth settings",
-        )
-    }
-
-    private fun matchAppSettings(text: String): LocalMatch? {
-        val hit = Regex(
-            """^(open|show)\s+(app\s+)?(settings|permissions)$|^kai (app )?settings$""",
-        ).containsMatchIn(text)
-        return if (hit) {
-            LocalMatch(
-                LocalCommand.OpenAppSettings,
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Opening app settings",
-            )
-        } else {
-            null
+        if (text.contains("bluetooth") && toggleWords.containsMatchIn(text)) {
+            return local(LocalCommand.OpenBluetoothSettings, "Opening Bluetooth settings")
         }
+        if (Regex("""^(?:open|show)\s+(?:the\s+)?(?:kai\s+)?app\s+(?:settings|permissions|info)$|^(?:open|show)\s+(?:the\s+)?permissions$|^(?:open\s+)?kai\s+(?:app\s+)?settings$""").matches(text)) {
+            return local(LocalCommand.OpenAppSettings, "Opening app settings")
+        }
+        val sections = listOf(
+            SettingsSection.MobileData to """\bmobile\s+data\b|\bcellular\s+data\b|\bdata\s+(?:on|off)\b""",
+            SettingsSection.Airplane to """\b(?:airplane|aeroplane|flight)\s+mode\b""",
+            SettingsSection.Hotspot to """\bhot\s?spot\b|\btethering\b""",
+            SettingsSection.Location to """\b(?:location|gps)\b""",
+            SettingsSection.DoNotDisturb to """\bdo\s+not\s+disturb\b|\bdnd\b""",
+            SettingsSection.Display to """\bbrightness\b|\bdark\s+mode\b|\bdisplay\s+settings\b""",
+            SettingsSection.Sound to """\bsound\s+settings\b|\bringtone\b|\bsilent\s+mode\b|\bvibrate\s+mode\b""",
+            SettingsSection.Battery to """\bbattery\s+(?:saver|settings)\b|\bpower\s+saving\b""",
+        )
+        for ((section, pattern) in sections) {
+            if (Regex(pattern).containsMatchIn(text) && toggleWords.containsMatchIn(text)) {
+                return local(LocalCommand.OpenSystemSettings(section), "Opening ${section.label}")
+            }
+        }
+        if (Regex("""^(?:open|show|launch|go to)\s+(?:the\s+)?(?:phone\s+|system\s+|android\s+)?settings(?:\s+app)?$|^settings$""").matches(text)) {
+            return local(LocalCommand.OpenSystemSettings(SettingsSection.Main), "Opening settings")
+        }
+        return null
     }
 
     private fun matchVolume(text: String): LocalMatch? {
-        Regex("""^(set|change|turn)\s+(the\s+)?volume\s+(to\s+)?(\d{1,3})\s*%?$""")
+        if (!Regex("""\b(volume|louder|quieter|mute|unmute|sound)\b""").containsMatchIn(text)) return null
+        if (text.contains("settings")) return null
+        Regex("""^(?:set|change|turn|put|make)?\s*(?:the\s+)?(?:media\s+)?(?:volume|sound)\s+(?:to\s+|at\s+)?(\d{1,3})\s*(?:%|percent)?$""")
             .find(text)
             ?.groupValues
-            ?.getOrNull(4)
+            ?.getOrNull(1)
             ?.toIntOrNull()
             ?.let { raw ->
                 val percent = raw.coerceIn(0, 100)
-                return LocalMatch(
-                    LocalCommand.SetVolume(percent),
-                    requiresConfirmation = false,
-                    confirmationPrompt = "",
-                    spokenLabel = "Setting volume to $percent percent",
-                )
+                return local(LocalCommand.SetVolume(percent), "Setting volume to $percent percent")
             }
-
-        when {
-            Regex("""^(turn\s+)?(the\s+)?volume\s+up$|^louder$|^increase volume$""").containsMatchIn(text) ->
-                return LocalMatch(
-                    LocalCommand.AdjustVolume(2),
-                    requiresConfirmation = false,
-                    confirmationPrompt = "",
-                    spokenLabel = "Turning volume up",
-                )
-            Regex("""^(turn\s+)?(the\s+)?volume\s+down$|^quieter$|^decrease volume$""").containsMatchIn(text) ->
-                return LocalMatch(
-                    LocalCommand.AdjustVolume(-2),
-                    requiresConfirmation = false,
-                    confirmationPrompt = "",
-                    spokenLabel = "Turning volume down",
-                )
-            Regex("""^mute$|^mute volume$""").containsMatchIn(text) ->
-                return LocalMatch(
-                    LocalCommand.SetVolume(0),
-                    requiresConfirmation = false,
-                    confirmationPrompt = "",
-                    spokenLabel = "Muting volume",
-                )
+        return when {
+            Regex("""^(?:set\s+)?(?:the\s+)?volume\s+(?:to\s+)?(?:max|maximum|full|100)$|^(?:max|maximum|full)\s+volume$""").matches(text) ->
+                local(LocalCommand.SetVolume(100), "Setting volume to maximum")
+            Regex("""^(?:turn|crank|pump)\s+(?:it|the\s+volume|the\s+sound|volume)\s+up$|^(?:turn|crank)\s+up\s+(?:the\s+)?(?:volume|sound)$|^(?:the\s+)?volume\s+up$|^louder$|^(?:increase|raise)\s+(?:the\s+)?(?:volume|sound)$""").matches(text) ->
+                local(LocalCommand.AdjustVolume(2), "Turning volume up")
+            Regex("""^(?:turn)\s+(?:it|the\s+volume|the\s+sound|volume)\s+down$|^turn\s+down\s+(?:the\s+)?(?:volume|sound)$|^(?:the\s+)?volume\s+down$|^quieter$|^(?:decrease|lower|reduce)\s+(?:the\s+)?(?:volume|sound)$""").matches(text) ->
+                local(LocalCommand.AdjustVolume(-2), "Turning volume down")
+            Regex("""^mute$|^mute\s+(?:the\s+)?(?:volume|sound|phone|media)$""").matches(text) ->
+                local(LocalCommand.SetVolume(0), "Muting volume")
+            Regex("""^unmute(?:\s+(?:the\s+)?(?:volume|sound|phone|media))?$""").matches(text) ->
+                local(LocalCommand.SetVolume(50), "Unmuting")
+            else -> null
         }
-        return null
     }
+
+    private val timerFiller = setOf(
+        "set", "start", "create", "make", "put", "run", "begin", "add", "a", "an", "the", "my", "new",
+        "timer", "countdown", "for", "of", "in", "after", "on", "alarm", "wake", "me", "up", "and",
+    )
+
+    private val durationPart = Regex("""(\d{1,4})\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)\b""")
+
+    private fun durationSeconds(text: String): Int? {
+        val parts = durationPart.findAll(text).toList()
+        if (parts.isEmpty()) return null
+        val total = parts.sumOf { part ->
+            val amount = part.groupValues[1].toInt()
+            val unit = part.groupValues[2]
+            when {
+                unit.startsWith("h") -> amount * 3600
+                unit.startsWith("m") -> amount * 60
+                else -> amount
+            }
+        }
+        return total.coerceIn(1, 24 * 3600)
+    }
+
+    private fun matchTimer(text: String): LocalMatch? {
+        if (Regex("""^(?:cancel|stop|delete|remove|end|turn off|dismiss)\s+(?:the\s+|my\s+)?(?:timer|countdown)$""").matches(text)) {
+            return local(LocalCommand.CancelTimer, "Cancelling the timer")
+        }
+        val timerWord = Regex("""\b(timer|countdown)\b""").containsMatchIn(text)
+        val alarmIn = Regex("""^(?:set\s+(?:an?\s+)?alarm|wake\s+me(?:\s+up)?|alarm)\s+(?:in|after)\s+""").containsMatchIn(text)
+        if (!timerWord && !alarmIn) return null
+        if (timerWord && Regex("""^(?:what|how|why|when|is|are|does|do)\b""").containsMatchIn(text)) return null
+        val residue = durationPart.replace(text, " ")
+            .replace(Regex("""\d+"""), " ")
+            .split(Regex("""[\s-]+"""))
+            .filter { it.isNotBlank() && it !in timerFiller }
+        if (residue.isNotEmpty()) return null
+        val seconds = durationSeconds(text) ?: run {
+            Regex("""^(?:set\s+(?:a\s+)?)?timer\s+(?:for\s+)?(\d{1,4})$""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+                ?.let { minutes -> (minutes * 60).coerceIn(1, 24 * 3600) }
+        } ?: return null
+        return local(LocalCommand.StartTimer(seconds, "KAI timer"), "Starting a timer for ${describeDuration(seconds)}")
+    }
+
+    private val alarmLead = Regex(
+        """^(?:set|create|add|put|keep|make)\s+(?:an?\s+|the\s+|my\s+)?alarm(?:\s+clock)?\s*(?:for|at|to|on)?\s*(.*)$""" +
+            """|^alarm\s+(?:for\s+|at\s+)?(.*)$""" +
+            """|^wake\s+me(?:\s+up)?\s*(?:at|by|for|on)?\s*(.*)$""",
+    )
+    private val alarmTime = Regex(
+        """^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?(?:\s+(in the morning|morning|in the evening|evening|at night|night|tonight|in the afternoon|afternoon))?$""",
+    )
 
     private fun matchAlarm(text: String): LocalMatch? {
-        val (core, repeat, weekday) = stripReminderRepeat(text)
-        // "set an alarm for 7:30" / "set alarm for 7" / "set an alarm for 6:30 a.m."
-        val withMinutes = Regex(
-            """^set\s+(an\s+|a\s+)?alarm\s+(for\s+)?(\d{1,2})(?::|\s+)(\d{2})\s*(am|pm)?$""",
-        ).find(core)
-        if (withMinutes != null) {
-            var hour = withMinutes.groupValues[3].toInt()
-            val minute = withMinutes.groupValues[4].toInt().coerceIn(0, 59)
-            val meridiem = withMinutes.groupValues[5]
-            hour = normalizeHour(hour, meridiem)
-            return alarmMatch(hour, minute, repeat, weekday)
+        val (stripped, repeat, weekday) = stripReminderRepeat(text)
+        val lead = alarmLead.find(stripped) ?: return null
+        var rest = lead.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        var dayOffset = 0
+        Regex("""^(?:for\s+|at\s+)?tomorrow\s+(?:morning\s+)?(?:at\s+)?""").find(rest)?.let { day ->
+            if (day.value.contains("morning")) rest = rest.removePrefix(day.value).trim() + " morning"
+            else rest = rest.removePrefix(day.value).trim()
+            dayOffset = 1
         }
-
-        val hourOnly = Regex(
-            """^set\s+(an\s+|a\s+)?alarm\s+(for\s+)?(\d{1,2})\s*(am|pm)$""",
-        ).find(core)
-        if (hourOnly != null) {
-            val hour = normalizeHour(hourOnly.groupValues[3].toInt(), hourOnly.groupValues[4])
-            return alarmMatch(hour, 0, repeat, weekday)
+        Regex("""\s+tomorrow(?:\s+morning)?$""").find(rest)?.let { day ->
+            rest = rest.substring(0, day.range.first).trim() + if (day.value.contains("morning")) " morning" else ""
+            dayOffset = 1
         }
-        return null
-    }
-
-    private fun alarmMatch(hour: Int, minute: Int, repeat: ReminderRepeat, weekday: Int?): LocalMatch {
-        val spoken = alarmSpokenLine(hour, minute, repeat, weekday)
+        rest = rest.removePrefix("at ").removePrefix("for ").trim()
+        val time = alarmTime.find(rest) ?: return null
+        val hour = time.groupValues[1].toInt()
+        val minute = time.groupValues[2].toIntOrNull() ?: 0
+        if (hour > 23 || minute > 59) return null
+        val meridiem = time.groupValues[3].ifBlank {
+            when (time.groupValues[4]) {
+                "" -> ""
+                "in the morning", "morning" -> "am"
+                else -> "pm"
+            }
+        }
+        val flexible = meridiem.isBlank() && hour in 1..12
+        val hour24 = normalizeHour(hour, meridiem)
+        val spoken = alarmSpokenLine(hour24, minute, repeat, weekday)
         return LocalMatch(
-            LocalCommand.SetAlarm(hour, minute, "KAI alarm", repeat, weekday),
+            LocalCommand.SetAlarm(hour24, minute, "KAI alarm", repeat, weekday, dayOffset, flexible),
             requiresConfirmation = false,
             confirmationPrompt = "Set an alarm${spoken.removePrefix("Alarm set").removeSuffix(".")}?",
             spokenLabel = "Setting an alarm",
         )
     }
 
-    private fun matchTimer(text: String): LocalMatch? {
-        val match = Regex(
-            """^set\s+(?:a\s+|an\s+)?(\d{1,4})\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\s+timer$""" +
-                """|^set\s+(?:a\s+|an\s+)?timer\s+(?:for\s+)?(\d{1,4})\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)?$""" +
-                """|^timer\s+(\d{1,4})\s*(seconds?|secs?|minutes?|mins?)?$""",
-        ).find(text) ?: return null
-
-        val amount = sequenceOf(1, 3, 5)
-            .map { match.groupValues[it] }
-            .firstNotNullOfOrNull { it.toIntOrNull() }
-            ?: return null
-        val unit = sequenceOf(2, 4, 6)
-            .map { match.groupValues[it] }
-            .firstOrNull { it.isNotBlank() }
-            ?: "seconds"
-        val seconds = when {
-            unit.startsWith("hour") || unit.startsWith("hr") -> amount * 3600
-            unit.startsWith("min") -> amount * 60
-            else -> amount
-        }.coerceIn(1, 24 * 3600)
-
-        return LocalMatch(
-            LocalCommand.StartTimer(seconds, "KAI timer"),
-            requiresConfirmation = true,
-            confirmationPrompt = "Start a timer for ${describeDuration(seconds)}?",
-            spokenLabel = "Starting a timer",
-        )
-    }
-
     private fun matchPhoto(text: String): LocalMatch? {
         val ask = parsePhotoAsk(text) ?: return null
-        return LocalMatch(
-            LocalCommand.DescribePhoto(useBackend = ask.useBackend),
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Describing a photo",
-        )
+        return local(LocalCommand.DescribePhoto(useBackend = ask.useBackend), "Describing a photo")
     }
 
     private fun matchCalendar(utterance: String): LocalMatch? {
@@ -284,12 +264,7 @@ class LocalIntentRouter {
             is CalendarRequest.Note -> "Saving a note"
             CalendarRequest.Briefing -> "Daily briefing"
         }
-        return LocalMatch(
-            command,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = label,
-        )
+        return local(command, label)
     }
 
     private fun matchMemory(utterance: String): LocalMatch? {
@@ -306,45 +281,23 @@ class LocalIntentRouter {
             MemoryRequest.ListProjects -> LocalCommand.RecallMemory(RecallMode.Projects)
             MemoryRequest.RecentTalk -> LocalCommand.RecallMemory(RecallMode.Recent)
         }
-        return LocalMatch(
-            command,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Checking memory",
-        )
+        return local(command, "Checking memory")
     }
 
     private fun matchScreenshot(text: String): LocalMatch? {
-        val hit = text == "screenshot" ||
-            text == "take a screenshot" ||
-            text == "take screenshot" ||
-            text == "capture the screen" ||
-            text == "capture my screen"
-        if (!hit) return null
-        return LocalMatch(
-            LocalCommand.TakeScreenshot,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Taking a screenshot",
-        )
+        val hit = Regex(
+            """^(?:take|grab|capture|get)\s+(?:a\s+|the\s+)?screenshot(?:\s+(?:now|of (?:this|the|my) screen))?$""" +
+                """|^screenshot(?:\s+(?:this|now|the screen))?$|^capture\s+(?:the\s+|my\s+|this\s+)?screen$""",
+        ).matches(text)
+        return if (hit) local(LocalCommand.TakeScreenshot, "Taking a screenshot") else null
     }
 
     private fun matchReminderEdit(text: String): LocalMatch? {
         ReminderUtterance.parseCancel(text)?.let { query ->
-            return LocalMatch(
-                LocalCommand.CancelReminder(query),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Cancelling a reminder",
-            )
+            return local(LocalCommand.CancelReminder(query), "Cancelling a reminder")
         }
         ReminderUtterance.parseChange(text)?.let { command ->
-            return LocalMatch(
-                command,
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Changing a reminder",
-            )
+            return local(command, "Changing a reminder")
         }
         return null
     }
@@ -364,31 +317,28 @@ class LocalIntentRouter {
             )
         }
         val command = if (items.size == 1) items.first() else LocalCommand.SetReminders(items)
-        return LocalMatch(
-            command,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = if (items.size == 1) "Setting a reminder" else "Setting reminders",
-        )
+        return local(command, if (items.size == 1) "Setting a reminder" else "Setting reminders")
     }
+
+    private val weekdayNumbers = mapOf(
+        "monday" to 1,
+        "tuesday" to 2,
+        "wednesday" to 3,
+        "thursday" to 4,
+        "friday" to 5,
+        "saturday" to 6,
+        "sunday" to 7,
+    )
 
     private fun stripReminderRepeat(text: String): Triple<String, ReminderRepeat, Int?> {
         val weekly = Regex(
-            """\s+every\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$""",
+            """\s+(?:every|on)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?$""",
         ).find(text)
         if (weekly != null) {
-            val day = mapOf(
-                "monday" to 1,
-                "tuesday" to 2,
-                "wednesday" to 3,
-                "thursday" to 4,
-                "friday" to 5,
-                "saturday" to 6,
-                "sunday" to 7,
-            ).getValue(weekly.groupValues[1])
+            val day = weekdayNumbers[weekly.groupValues[1]] ?: return Triple(text, ReminderRepeat.Once, null)
             return Triple(text.removeSuffix(weekly.value).trim(), ReminderRepeat.Weekly, day)
         }
-        val daily = Regex("""\s+(?:every\s+day|daily)$""").find(text)
+        val daily = Regex("""\s+(?:every\s+day|everyday|daily|every\s+morning)$""").find(text)
         if (daily != null) return Triple(text.removeSuffix(daily.value).trim(), ReminderRepeat.Daily, null)
         val weekdays = Regex("""\s+(?:every\s+weekday|on\s+weekdays|weekdays)$""").find(text)
         if (weekdays != null) return Triple(text.removeSuffix(weekdays.value).trim(), ReminderRepeat.Weekdays, null)
@@ -397,54 +347,43 @@ class LocalIntentRouter {
 
     private fun matchScreen(text: String): LocalMatch? {
         val hit = Regex(
-            """^(?:what(?:'s| is)?|whats)\s+on\s+(?:my\s+|the\s+)?screen$""",
+            """^(?:what(?:'s| is)?|whats)\s+on\s+(?:my\s+|the\s+|this\s+)?screen$""" +
+                """|^(?:read|describe)\s+(?:out\s+)?(?:my|the|this)\s+screen$|^what am i looking at$""",
         ).matches(text)
-        if (!hit) return null
-        return LocalMatch(
-            LocalCommand.DescribeScreen,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Looking at the screen",
-        )
+        return if (hit) local(LocalCommand.DescribeScreen, "Looking at the screen") else null
     }
 
     private fun matchMaps(text: String): LocalMatch? {
-        val navigate = Regex("""^(navigate|directions)\s+to\s+(.+)$""").find(text)
-        if (navigate != null) {
-            val query = navigate.groupValues[2].trim()
-            if (query.isBlank()) return null
-            return LocalMatch(
-                LocalCommand.OpenMaps(query),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Opening maps",
-            )
+        val patterns = listOf(
+            Regex("""^(?:navigate|directions|route|drive)\s+(?:me\s+)?to\s+(.+)$"""),
+            Regex("""^(?:get|give|show)\s+(?:me\s+)?directions\s+to\s+(.+)$"""),
+            Regex("""^take\s+me\s+(?:to\s+)?(home|.+)$"""),
+            Regex("""^how\s+(?:do|can)\s+i\s+(?:get|go)\s+to\s+(.+)$"""),
+            Regex("""^show\s+(?:me\s+)?(.+?)\s+on\s+(?:the\s+)?maps?$"""),
+            Regex("""^(?:find|show me|search for)\s+(?:a\s+|the\s+)?(.+?\s+near\s*(?:me|by))$"""),
+            Regex("""^(?:where(?:'s| is)\s+the\s+nearest)\s+(.+)$"""),
+            Regex("""^(.+?\s+near\s+me)$"""),
+        )
+        for (pattern in patterns) {
+            val query = pattern.find(text)?.groupValues?.get(1)?.trim().orEmpty()
+            if (query.isNotBlank()) {
+                val target = if (pattern.pattern.contains("nearest")) "$query near me" else query
+                return local(LocalCommand.OpenMaps(target), "Opening maps")
+            }
         }
-        val openMaps = Regex("""^open\s+maps(?:\s+(to|for)\s+(.+))?$""").find(text)
+        val openMaps = Regex("""^(?:open|launch)\s+(?:google\s+)?maps(?:\s+(?:to|for)\s+(.+))?$""").find(text)
         if (openMaps != null) {
-            val query = openMaps.groupValues.getOrNull(2)?.trim().orEmpty().ifBlank { "nearby" }
-            return LocalMatch(
-                LocalCommand.OpenMaps(query),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Opening maps",
-            )
+            val query = openMaps.groupValues.getOrNull(1)?.trim().orEmpty().ifBlank { "nearby" }
+            return local(LocalCommand.OpenMaps(query), "Opening maps")
         }
         return null
     }
 
     private fun matchCamera(text: String): LocalMatch? {
-        val hit = Regex("""^(open|launch)\s+(the\s+)?camera$|^take\s+(a\s+)?(photo|picture)$""").containsMatchIn(text)
-        return if (hit) {
-            LocalMatch(
-                LocalCommand.OpenCamera,
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = "Opening camera",
-            )
-        } else {
-            null
-        }
+        val hit = Regex(
+            """^(?:open|launch|start)\s+(?:the\s+)?camera(?:\s+app)?$|^(?:take|click|capture)\s+(?:a\s+|me\s+a\s+)?(?:photo|picture|pic|selfie|snap)$""",
+        ).matches(text)
+        return if (hit) local(LocalCommand.OpenCamera, "Opening camera") else null
     }
 
     private val confirmationPrefix = Regex(
@@ -457,13 +396,20 @@ class LocalIntentRouter {
         """\s+(confirmed|confirm|okay|ok|yes|yeah|yep|yup|please|now)$""",
     )
     private val callVerb = Regex(
-        """^(?:(?:make|place)\s+a\s+)?(?:phone\s+call|call|phone|dial)(?:\s+to)?(?:\s+the)?\s+(\S(?:.*\S)?)$""",
+        """^(?:(?:make|place|start|do)\s+a\s+)?(?:normal\s+|regular\s+|voice\s+|phone\s+)?(?:phone\s+call|call|phone|dial|ring(?:\s+up)?)(?:\s+to)?(?:\s+the)?\s+(\S(?:.*\S)?)$""",
     )
     private val giveCall = Regex(
-        """^give\s+(.+?)\s+a\s+(?:phone\s+)?call$""",
+        """^give\s+(.+?)\s+a\s+(?:phone\s+)?(?:call|ring|buzz)$""",
+    )
+    private val hinglishCall = Regex(
+        """^(.+?)\s+(?:ko|ku)\s+(?:phone|call|fone)\s+(?:karo|kar|lagao|laga|kardo|kar do|karna|lagana|kijiye|kariye)$""" +
+            """|^(?:call|phone)\s+(?:karo|lagao|laga|kar)\s+(.+?)(?:\s+(?:ko|ku))?$""",
     )
     private val typedSuffix = Regex(
-        """^(.*\S)\s+(?:on|at)(?:\s+(?:his|her|their))?\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)$""",
+        """^(.*\S)\s+(?:on|at)(?:\s+(?:his|her|their))?\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)(?:\s+number)?$""",
+    )
+    private val possessiveType = Regex(
+        """^(.*\S)'s\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)(?:\s+number)?$""",
     )
     private val bareTypeSuffix = Regex(
         """^(.*\S)\s+(mobile|cell(?:\s+phone)?|cellphone|home|work|office)$""",
@@ -475,32 +421,47 @@ class LocalIntentRouter {
         "yesterday", "off", "out", "soon", "again", "settings", "help", "a", "an",
         "the", "my", "your", "our", "day", "quits", "up", "down", "now", "please",
         "yes", "yeah", "yep", "yup", "ok", "okay", "confirm", "confirmed",
-        "number", "people", "person", "time", "times", "about",
+        "number", "people", "person", "time", "times", "about", "this", "that",
     )
 
-    private fun matchWhatsApp(text: String): LocalMatch? {
-        WhatsAppUtterance.parseCall(text)?.let { call ->
+    private fun matchSms(text: String, spoken: String): LocalMatch? {
+        val parsed = SmsUtterance.parse(text) ?: return null
+        val options = parsed.map { it.copy(message = originalCase(spoken, it.message)) }
+        val command = LocalCommand.SendSms(options = options)
+        val label = if (command.rawNumber) command.nameQuery else ContactMatcher.displayQuery(command.nameQuery)
+        return local(command, "Texting $label")
+    }
+
+    private fun matchWhatsApp(text: String, spoken: String): LocalMatch? {
+        val hinglishVideo = Regex("""^(.+?)\s+(?:ko|ku)\s+(video|whatsapp|whatsapp video)\s+call\s+(?:karo|kar|lagao|laga|kardo|kar do)$""").find(text)
+        val call = WhatsAppUtterance.parseCall(text)
+            ?: hinglishVideo?.let { match ->
+                val name = match.groupValues[1].trim()
+                if (WhatsAppUtterance.isContactName(name)) {
+                    WhatsAppUtterance.Call(name, video = match.groupValues[2].contains("video"))
+                } else {
+                    null
+                }
+            }
+        if (call != null) {
             val label = ContactMatcher.displayQuery(call.nameQuery)
-            val spoken = if (call.video) {
+            val spokenLine = if (call.video) {
                 "Video calling $label on WhatsApp"
             } else {
                 "Calling $label on WhatsApp"
             }
-            return LocalMatch(
-                command = LocalCommand.WhatsAppCall(nameQuery = call.nameQuery, video = call.video),
-                requiresConfirmation = false,
-                confirmationPrompt = "",
-                spokenLabel = spoken,
-            )
+            return local(LocalCommand.WhatsAppCall(nameQuery = call.nameQuery, video = call.video), spokenLine)
         }
         val parsed = WhatsAppUtterance.parse(text) ?: return null
-        val label = ContactMatcher.displayQuery(parsed.nameQuery)
-        return LocalMatch(
-            command = LocalCommand.SendWhatsApp(options = parsed.options),
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Sending ${parsed.message} to $label on WhatsApp",
-        )
+        val options = parsed.options.map { it.copy(message = originalCase(spoken, it.message)) }
+        val first = options.first()
+        val label = ContactMatcher.displayQuery(first.nameQuery)
+        val line = if (first.message.isBlank()) {
+            "Opening WhatsApp chat with $label"
+        } else {
+            "Sending ${first.message} to $label on WhatsApp"
+        }
+        return local(LocalCommand.SendWhatsApp(options = options), line)
     }
 
     private fun matchCall(text: String): LocalMatch? {
@@ -524,16 +485,14 @@ class LocalIntentRouter {
         val label = command.resolvedName ?: ContactMatcher.displayQuery(
             if (command.rawNumber) command.resolvedName ?: command.query else command.query,
         )
-        // A single match places the call immediately. No confirm dialog.
-        return LocalMatch(
-            command = command,
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Calling $label",
-        )
+        return local(command, "Calling $label")
     }
 
     private fun extractCallTarget(text: String): String? {
+        if (text.startsWith("video ")) return null
+        hinglishCall.find(text)?.let { match ->
+            return match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim()
+        }
         callVerb.find(text)?.let { return it.groupValues[1].trim() }
         giveCall.find(text)?.let { return it.groupValues[1].trim() }
         return null
@@ -543,11 +502,14 @@ class LocalIntentRouter {
         val stripped = stripTrailingConfirmation(rawTarget)
         var target = stripped.target
             .replace(Regex("""\s+on\s+(?:this|the|my)\s+phone$"""), "")
+            .replace(Regex("""\s+(?:on|with)\s+(?:the\s+)?speaker(?:\s*phone)?$"""), "")
+            .replace(Regex("""\s+(?:using|with|from)\s+(?:the\s+)?(?:sim\s*\d|dialer|phone app)$"""), "")
+            .replace(Regex("""^my\s+"""), "")
             .trim()
         if (target.isBlank()) return null
 
         var phoneType: PhoneKind? = null
-        typedSuffix.find(target)?.let { match ->
+        (typedSuffix.find(target) ?: possessiveType.find(target))?.let { match ->
             phoneType = phoneKind(match.groupValues[2])
             target = match.groupValues[1].trim()
         }
@@ -623,12 +585,6 @@ class LocalIntentRouter {
         return null
     }
 
-    private fun looksLikePhoneNumber(target: String): Boolean {
-        val digits = target.count { it.isDigit() }
-        if (digits !in 3..15) return false
-        return target.all { it.isDigit() || it in "+-(). " }
-    }
-
     private fun looksLikeContactName(target: String): Boolean {
         val parts = target.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (parts.isEmpty() || parts.size > 4) return false
@@ -655,32 +611,21 @@ class LocalIntentRouter {
     )
 
     private fun matchLaunchApp(text: String): LocalMatch? {
-        val match = Regex("""^(open|launch|start)\s+(the\s+)?(.+?)(\s+app)?$""").find(text) ?: return null
-        val name = match.groupValues[3].trim()
-        if (name.isBlank() || name.contains(" and ")) return null
-        // Avoid stealing more specific intents already handled above.
+        val match = Regex("""^(?:open|launch|start|open up)\s+(?:the\s+|my\s+)?(.+?)(?:\s+app(?:lication)?)?$""").find(text) ?: return null
+        val name = match.groupValues[1].trim()
+        if (name.isBlank() || name.contains(" and ") || name.split(" ").size > 4) return null
         val blocked = setOf(
             "settings", "wifi", "wi-fi", "bluetooth", "camera", "maps",
             "flashlight", "torch", "flash", "volume", "alarm", "timer",
         )
         if (name in blocked) return null
         if (name.startsWith("wifi") || name.startsWith("wi-fi") || name.startsWith("bluetooth")) return null
-        return LocalMatch(
-            LocalCommand.LaunchAppByName(name),
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Opening $name",
-        )
+        return local(LocalCommand.LaunchAppByName(name), "Opening $name")
     }
 
     private fun matchYouTube(text: String): LocalMatch? {
         val query = parseYouTubeSearch(text) ?: return null
-        return LocalMatch(
-            LocalCommand.SearchYouTube(query),
-            requiresConfirmation = false,
-            confirmationPrompt = "",
-            spokenLabel = "Searching YouTube",
-        )
+        return local(LocalCommand.SearchYouTube(query), "Searching YouTube")
     }
 
     private fun normalizeHour(hour: Int, meridiem: String): Int {
@@ -692,12 +637,21 @@ class LocalIntentRouter {
         return h
     }
 
-    private fun formatClock(hour: Int, minute: Int): String =
-        "%d:%02d".format(hour, minute)
+    private fun describeDuration(seconds: Int): String = durationLabel(seconds)
+}
 
-    private fun describeDuration(seconds: Int): String = when {
-        seconds % 3600 == 0 -> "${seconds / 3600} hour${if (seconds == 3600) "" else "s"}"
-        seconds % 60 == 0 -> "${seconds / 60} minute${if (seconds == 60) "" else "s"}"
-        else -> "$seconds seconds"
-    }
+/** Message words as the user typed or said them, when the lowercase copy can be found. */
+internal fun originalCase(spoken: String, lowered: String): String {
+    if (lowered.isEmpty()) return lowered
+    val index = spoken.lowercase().lastIndexOf(lowered)
+    if (index < 0 || spoken.length != spoken.lowercase().length) return lowered
+    return spoken.substring(index, index + lowered.length)
+}
+
+private val looksLikeNumber = Regex("""^[+(\d][\d\s().-]*$""")
+
+internal fun looksLikePhoneNumber(target: String): Boolean {
+    val digits = target.count { it.isDigit() }
+    if (digits !in 3..15) return false
+    return looksLikeNumber.matches(target.trim())
 }

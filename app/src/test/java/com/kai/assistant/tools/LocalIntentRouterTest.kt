@@ -42,7 +42,7 @@ class LocalIntentRouterTest {
         assertEquals(LocalCommand.AdjustVolume(2), router.match("volume up")!!.command)
 
         val timer = router.match("set a timer for 2 minutes")
-        assertTrue(timer!!.requiresConfirmation)
+        assertFalse(timer!!.requiresConfirmation)
         assertEquals(LocalCommand.StartTimer(120, "KAI timer"), timer.command)
     }
 
@@ -144,7 +144,10 @@ class LocalIntentRouterTest {
         assertEquals("hi", command.options.first().message)
 
         assertEquals(LocalCommand.CallContact(query = "kaif"), router.match("call kaif")!!.command)
-        assertNull(router.match("send hi to mom"))
+        assertEquals(
+            LocalCommand.SendWhatsApp(options = listOf(WhatsAppUtterance.Option("mom", "hi"))),
+            router.match("send hi to mom")!!.command,
+        )
     }
 
     @Test

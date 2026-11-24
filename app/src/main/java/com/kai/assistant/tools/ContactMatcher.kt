@@ -45,10 +45,18 @@ sealed class ContactMatchResult {
 
 /**
  * Picks a single on-device contact for a spoken name.
- * Exact display-name matches win over "Kaif" inside "Kaif Ahmed".
- * A name fragment such as "kai" does not match "Kaif".
+ * Every saved contact is scored with edit distance and a phonetic key tuned for
+ * Indian English speech ("Kev", "Kef" and "Cab" all sound like "Kaif"), and the
+ * closest one wins. Only an exact tie between two contacts asks for the full name.
  */
 object ContactMatcher {
+    /** Lowest score that still counts as the spoken name. */
+    const val MIN_SCORE = 0.6
+    private const val TIE = 0.001
+    private const val EXACT = 1.05
+    private const val EXACT_WITHOUT_TITLES = 1.03
+    private const val UNMATCHED_QUERY_TOKEN = 0.25
+
     fun match(
         query: String,
         phones: List<ContactPhone>,
@@ -61,13 +69,13 @@ object ContactMatcher {
             .groupBy { it.contactId }
             .mapNotNull { (id, rows) ->
                 val name = rows.firstOrNull { it.displayName.isNotBlank() }?.displayName ?: return@mapNotNull null
-                val quality = nameQuality(normalizedQuery, name)
-                if (quality == 0) null else ScoredContact(id, name, quality, rows)
+                val score = nameScore(normalizedQuery, name)
+                if (score < MIN_SCORE) null else ScoredContact(id, name, score, rows)
             }
         if (scored.isEmpty()) return ContactMatchResult.None(query)
 
-        val best = scored.maxOf { it.quality }
-        val pool = scored.filter { it.quality == best }
+        val best = scored.maxOf { it.score }
+        val pool = scored.filter { best - it.score < TIE }
         if (pool.size > 1) {
             val options = pool
                 .map { contact ->
@@ -138,15 +146,14 @@ object ContactMatcher {
         PhoneKind.Other -> "phone"
     }
 
+    /** Lowercase letters and digits separated by single spaces. Accents, emoji and punctuation go. */
     fun normalizeName(value: String): String {
         val stripped = Normalizer.normalize(value, Normalizer.Form.NFD)
             .replace(Regex("\\p{Mn}+"), "")
         return stripped
-            .trim()
             .lowercase(Locale.ROOT)
-            .replace('’', '\'')
-            .replace(Regex("[.]+"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("[’'.]"), "")
+            .replace(Regex("[^\\p{L}\\p{Nd}]+"), " ")
             .trim()
     }
 
@@ -157,92 +164,143 @@ object ContactMatcher {
         return if (leadingPlus) "+$digits" else digits
     }
 
-    fun nameQuality(normalizedQuery: String, displayName: String): Int {
+    /** The closest any saved contact comes to [query]; 0 when none clears [MIN_SCORE]. */
+    fun bestScore(query: String, phones: List<ContactPhone>): Double {
+        val normalizedQuery = normalizeName(query)
+        if (normalizedQuery.isBlank()) return 0.0
+        val best = phones.asSequence()
+            .map { it.displayName }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .maxOfOrNull { nameScore(normalizedQuery, it) } ?: 0.0
+        return if (best < MIN_SCORE) 0.0 else best
+    }
+
+    /**
+     * How close a normalized spoken name is to a saved display name.
+     * 1.05 is an exact match; [MIN_SCORE] is the lowest that still counts.
+     */
+    fun nameScore(normalizedQuery: String, displayName: String): Double {
         val name = normalizeName(displayName)
-        if (normalizedQuery.isEmpty() || name.isEmpty()) return 0
-        if (normalizedQuery == name) return 100
-        val tokens = name.split(" ")
-        val queryTokens = normalizedQuery.split(" ")
-        if (queryTokens.size == 1 && normalizedQuery in tokens) return 80
-        if (queryTokens.size > 1 &&
-            tokens.size >= queryTokens.size &&
-            tokens.take(queryTokens.size) == queryTokens
-        ) {
-            return 80
-        }
-        if (queryTokens.size == tokens.size && queryTokens.zip(tokens).all { (query, token) ->
-                tokensClose(query, token)
+        if (normalizedQuery.isEmpty() || name.isEmpty()) return 0.0
+        if (normalizedQuery == name) return EXACT
+        val queryTokens = withoutTitles(normalizedQuery.split(" "))
+        val nameTokens = withoutTitles(name.split(" "))
+        if (queryTokens == nameTokens) return EXACT_WITHOUT_TITLES
+        val aligned = alignedScore(queryTokens, nameTokens)
+        val joined = tokenSimilarity(queryTokens.joinToString(""), nameTokens.joinToString("")) * 0.97
+        return maxOf(aligned, joined)
+    }
+
+    /** Each spoken word pairs with its closest unused saved word. */
+    private fun alignedScore(query: List<String>, name: List<String>): Double {
+        val pairs = mutableListOf<Triple<Int, Int, Double>>()
+        for (q in query.indices) {
+            for (n in name.indices) {
+                pairs += Triple(q, n, tokenSimilarity(query[q], name[n]))
             }
-        ) {
-            val distance = queryTokens.zip(tokens).sumOf { (query, token) -> editDistance(query, token) }
-            return 60 - distance
         }
-        if (queryTokens.size == 1) {
-            val query = queryTokens.single()
-            val closest = tokens
-                .filter { tokensClose(query, it) }
-                .minOfOrNull { editDistance(query, it) }
-            if (closest != null) return 40 - closest
+        pairs.sortByDescending { it.third }
+        val usedQuery = BooleanArray(query.size)
+        val usedName = BooleanArray(name.size)
+        var total = 0.0
+        var matched = 0
+        var firstAligned = false
+        for ((q, n, sim) in pairs) {
+            if (usedQuery[q] || usedName[n] || sim <= 0.0) continue
+            usedQuery[q] = true
+            usedName[n] = true
+            total += sim
+            matched++
+            if (q == 0 && n == 0) firstAligned = true
         }
-        return 0
+        total += (query.size - matched) * UNMATCHED_QUERY_TOKEN
+        val average = total / query.size
+        val coverage = matched.toDouble() / name.size
+        val order = if (firstAligned) 0.02 else 0.0
+        return average * (0.88 + 0.12 * coverage) + order
     }
 
-    private val spokenFamilies = listOf(
-        setOf("kaif", "kev", "ke", "kef", "cab"),
-        setOf("mohamed", "mohammad", "muhammad", "mohammed", "mohamad", "muhammed", "muhamad"),
-    )
-
-    private fun tokensClose(query: String, token: String): Boolean {
-        if (query == token) return true
-        if (spokenFamilies.any { family -> query in family && token in family }) return true
-        if (phoneticKey(query) != phoneticKey(token)) return false
-        val distance = editDistance(query, token)
-        val limit = when {
-            minOf(query.length, token.length) <= 4 -> 1
-            minOf(query.length, token.length) <= 8 -> 3
-            else -> 4
+    internal fun tokenSimilarity(left: String, right: String): Double {
+        if (left == right) return 1.0
+        if (left.isEmpty() || right.isEmpty()) return 0.0
+        var spelled = 1.0 - editDistance(left, right).toDouble() / maxOf(left.length, right.length)
+        val shorter = if (left.length <= right.length) left else right
+        val longer = if (shorter === left) right else left
+        if (shorter.length >= 3 && longer.startsWith(shorter)) spelled = maxOf(spelled, 0.8)
+        val leftKey = phoneticKey(left)
+        val rightKey = phoneticKey(right)
+        val sounded = if (leftKey == rightKey) {
+            0.9 + 0.08 * spelled
+        } else {
+            val keyLength = maxOf(leftKey.length, rightKey.length, 1)
+            (1.0 - editDistance(leftKey, rightKey).toDouble() / keyLength) * 0.9
         }
-        return distance <= limit
+        val similarity = maxOf(spelled, sounded)
+        val sameStart = leftKey.firstOrNull() == rightKey.firstOrNull()
+        return if (sameStart) similarity else similarity * 0.6
     }
 
-    private fun phoneticKey(token: String): String {
+    /**
+     * Consonant skeleton. Labials (b p f v w) share one sound because spoken
+     * "Kaif" comes back as "Kev", "Kef" or "Cab"; h is silent so
+     * Mohamed, Mohammed, Muhammad and Mohd all read as "md".
+     */
+    internal fun phoneticKey(token: String): String {
         if (token.isEmpty()) return ""
-        val folded = buildString {
-            var index = 0
-            while (index < token.length) {
-                val char = token[index]
-                if (char == 'c' && index + 1 < token.length && token[index + 1] == 'k') {
-                    append('k')
-                    index += 2
-                    continue
-                }
-                if (char == 'p' && index + 1 < token.length && token[index + 1] == 'h') {
-                    append('f')
-                    index += 2
-                    continue
-                }
-                append(
-                    when (char) {
-                        'c', 'q', 'k' -> 'k'
-                        'v', 'f' -> 'f'
-                        'z', 's' -> 's'
-                        'x' -> 'k'
-                        else -> char
-                    },
-                )
-                index++
+        val folded = StringBuilder()
+        var index = 0
+        while (index < token.length) {
+            val char = token[index]
+            val next = token.getOrNull(index + 1)
+            val pair = if (next != null) "$char$next" else ""
+            val digraph = when (pair) {
+                "ph", "bh" -> 'p'
+                "kh", "ck", "gh" -> if (pair == "gh") 'g' else 'k'
+                "th" -> 't'
+                "dh" -> 'd'
+                "sh" -> 's'
+                "ch" -> 'c'
+                else -> null
             }
+            if (digraph != null) {
+                folded.append(digraph)
+                index += 2
+                continue
+            }
+            val mapped = when (char) {
+                'c' -> if (next == 'e' || next == 'i') 's' else 'k'
+                'k', 'q' -> 'k'
+                'x' -> 'k'
+                'b', 'p', 'f', 'v', 'w' -> 'p'
+                'z', 's' -> 's'
+                'h' -> null
+                'a', 'e', 'i', 'o', 'u', 'y' -> 'a'
+                else -> char
+            }
+            if (mapped != null) folded.append(mapped)
+            index++
         }
         val key = StringBuilder()
-        folded.forEachIndexed { index, char ->
-            val vowel = char == 'a' || char == 'e' || char == 'i' || char == 'o' || char == 'u' || char == 'y'
-            if (index == 0) {
+        folded.forEachIndexed { position, char ->
+            if (position == 0) {
                 key.append(char)
-            } else if (!vowel && (key.isEmpty() || char != key.last())) {
+            } else if (char != 'a' && char != key.last()) {
                 key.append(char)
             }
         }
         return key.toString()
+    }
+
+    private val titles = setOf(
+        "bhai", "bhaiya", "bhaijaan", "bhaijan", "bhayya", "sir", "ji", "jee", "sahab", "saab",
+        "sahib", "saheb", "uncle", "aunty", "auntie", "madam", "maam", "mam", "bro", "mr",
+        "mrs", "ms", "dr", "new", "old",
+    )
+
+    private fun withoutTitles(tokens: List<String>): List<String> {
+        val kept = tokens.filter { it.isNotBlank() && it !in titles }
+        return kept.ifEmpty { tokens.filter { it.isNotBlank() } }
     }
 
     private fun editDistance(left: String, right: String): Int {
@@ -301,7 +359,7 @@ object ContactMatcher {
     private data class ScoredContact(
         val id: Long,
         val name: String,
-        val quality: Int,
+        val score: Double,
         val phones: List<ContactPhone>,
     )
 }

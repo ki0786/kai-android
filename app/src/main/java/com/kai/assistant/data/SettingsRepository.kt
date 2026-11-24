@@ -20,6 +20,8 @@ data class KaiSettings(
     val voiceGender: VoiceGender = VoiceGender.Female,
     val speechRate: Float = 1.0f,
     val memoryEnabled: Boolean = true,
+    /** Keep a log of conversation turns on this phone. Off until the user turns it on. */
+    val chatHistoryEnabled: Boolean = false,
     val darkTheme: Boolean = false,
 )
 
@@ -30,6 +32,7 @@ class SettingsRepository(private val context: Context) {
         val speechRate = floatPreferencesKey("speech_rate")
         val memoryEnabled = booleanPreferencesKey("memory_enabled")
         val darkTheme = booleanPreferencesKey("dark_theme")
+        val chatHistory = booleanPreferencesKey("chat_history_enabled")
     }
 
     val settings: Flow<KaiSettings> = context.dataStore.data.map { prefs ->
@@ -41,6 +44,7 @@ class SettingsRepository(private val context: Context) {
             speechRate = prefs[Keys.speechRate] ?: 1.0f,
             memoryEnabled = prefs[Keys.memoryEnabled] ?: true,
             darkTheme = prefs[Keys.darkTheme] ?: false,
+            chatHistoryEnabled = prefs[Keys.chatHistory] ?: false,
         )
     }
 
@@ -58,6 +62,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMemoryEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.memoryEnabled] = enabled }
+    }
+
+    suspend fun setChatHistoryEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.chatHistory] = enabled }
     }
 
     suspend fun setDarkTheme(enabled: Boolean) {

@@ -6,6 +6,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.ContactsContract
+import android.telephony.TelephonyManager
+import java.util.Locale
 
 /**
  * Hands a message or a voice/video call to the installed WhatsApp app.
@@ -25,9 +27,7 @@ class WhatsAppTool(context: Context) {
             )
         }
         val phones = try {
-            command.options
-                .flatMap { contacts.lookup(it.nameQuery) }
-                .distinctBy { it.contactId to ContactMatcher.normalizeNumber(it.number) }
+            contacts.allPhones()
         } catch (_: SecurityException) {
             val name = ContactMatcher.displayQuery(command.nameQuery)
             return WhatsAppResolution.Speak(
@@ -46,7 +46,7 @@ class WhatsAppTool(context: Context) {
             )
         }
         val phones = try {
-            contacts.lookup(command.nameQuery)
+            contacts.allPhones()
         } catch (_: SecurityException) {
             val name = ContactMatcher.displayQuery(command.nameQuery)
             return WhatsAppCallResolution.Speak(
@@ -84,7 +84,7 @@ class WhatsAppTool(context: Context) {
     }
 
     private fun launch(number: String, displayName: String, message: String): ToolResult {
-        val jid = messageJid(number)
+        val jid = messageJid(number, defaultCallingCode())
             ?: return ToolResult.Error("That number for $displayName isn't usable on WhatsApp.")
         val pkg = installedPackage()
             ?: return ToolResult.Unsupported(
@@ -249,6 +249,14 @@ class WhatsAppTool(context: Context) {
         }
     }
 
+    private fun defaultCallingCode(): String? {
+        val telephony = appContext.getSystemService(TelephonyManager::class.java)
+        val iso = runCatching {
+            telephony?.simCountryIso?.ifBlank { null } ?: telephony?.networkCountryIso?.ifBlank { null }
+        }.getOrNull() ?: Locale.getDefault().country
+        return callingCodeFor(iso)
+    }
+
     private fun installedPackage(): String? = installedPackages().firstOrNull()
 
     private fun installedPackages(): List<String> {
@@ -264,10 +272,49 @@ class WhatsAppTool(context: Context) {
     }
 }
 
-internal fun messageJid(number: String): String? {
-    val digits = number.filter { it.isDigit() }
+internal fun messageJid(number: String, defaultCallingCode: String? = null): String? {
+    val digits = internationalDigits(number, defaultCallingCode)
     if (digits.length < 3) return null
     return "$digits@s.whatsapp.net"
+}
+
+/**
+ * WhatsApp needs the country code. Contacts are often saved as "98765 43210" or
+ * "098765 43210", so a national number gets the SIM's calling code in front.
+ */
+internal fun internationalDigits(number: String, defaultCallingCode: String?): String {
+    val trimmed = number.trim()
+    val digits = trimmed.filter { it.isDigit() }
+    if (trimmed.startsWith("+")) return digits
+    if (digits.startsWith("00")) return digits.drop(2)
+    val code = defaultCallingCode?.filter { it.isDigit() }.orEmpty()
+    if (code.isEmpty()) return digits
+    val national = digits.trimStart('0')
+    if (digits.startsWith("0")) return code + national
+    if (digits.length <= 10) return code + digits
+    return digits
+}
+
+internal fun callingCodeFor(iso: String?): String? = when (iso?.lowercase(Locale.ROOT)) {
+    "in" -> "91"
+    "us", "ca" -> "1"
+    "gb" -> "44"
+    "ae" -> "971"
+    "sa" -> "966"
+    "qa" -> "974"
+    "kw" -> "965"
+    "om" -> "968"
+    "bh" -> "973"
+    "pk" -> "92"
+    "bd" -> "880"
+    "np" -> "977"
+    "lk" -> "94"
+    "sg" -> "65"
+    "my" -> "60"
+    "au" -> "61"
+    "de" -> "49"
+    "fr" -> "33"
+    else -> null
 }
 
 internal fun callMime(packageName: String, video: Boolean): String {

@@ -28,7 +28,11 @@ import com.kai.assistant.tools.StepReport
 import com.kai.assistant.tools.needsCalendar
 import com.kai.assistant.tools.needsNotification
 import com.kai.assistant.tools.planIntro
-import com.kai.assistant.tools.planLocalSteps
+import com.kai.assistant.tools.KAI_SYSTEM_PROMPT
+import com.kai.assistant.tools.PartialPlan
+import com.kai.assistant.tools.fixCantActReply
+import com.kai.assistant.tools.phoneActionHint
+import com.kai.assistant.tools.planSteps
 import com.kai.assistant.tools.planStepLine
 import com.kai.assistant.tools.planSummary
 import com.kai.assistant.tools.researchQuery
@@ -87,7 +91,7 @@ sealed class TurnOutcome {
  */
 class AssistantTurnProcessor(
     context: Context,
-    private val api: KaiApiClient = KaiApiClient(),
+    private val api: KaiApiClient = KaiApiClient.forDevice(context.applicationContext),
     private val intentRouter: LocalIntentRouter = LocalIntentRouter(),
     private val tools: LocalToolRouter = LocalToolRouter(context.applicationContext),
     private val settingsRepository: SettingsRepository = SettingsRepository(context.applicationContext),
@@ -111,16 +115,20 @@ class AssistantTurnProcessor(
         }
         refreshMemoryGate()
         val match = intentRouter.match(trimmed)
-        val planned = if (match == null) {
-            planLocalSteps(trimmed) { clause -> intentRouter.match(clause) }
-        } else {
-            null
-        }
-        val researched = if (match == null && planned.isNullOrEmpty()) researchQuery(trimmed) else null
-        val onDevice = match?.command?.staysOnDevice() == true || planned != null || researched != null
+        val plan = if (match == null) planSteps(trimmed) { clause -> intentRouter.match(clause) } else null
+        val hint = if (match == null && plan == null) phoneActionHint(trimmed) else null
+        val researched = if (match == null && plan == null && hint == null) researchQuery(trimmed) else null
+        val onDevice = match?.command?.staysOnDevice() == true ||
+            (plan != null && plan.leftover.isEmpty()) ||
+            hint != null ||
+            researched != null
         ingestUserText(trimmed, deviceOnly = onDevice)
         return try {
-            dispatch(match, planned, researched)
+            when {
+                hint != null -> rememberReady(hint, deviceOnly = true)
+                plan != null -> dispatchPlan(plan)
+                else -> dispatch(match, researched)
+            }
         } finally {
             memory.recordTurn(
                 role = "user",
@@ -130,9 +138,40 @@ class AssistantTurnProcessor(
         }
     }
 
+    /**
+     * Phone steps run on the device. Clauses that aren't phone actions go to chat
+     * afterwards, so one odd clause doesn't send the whole command to the cloud.
+     */
+    private suspend fun dispatchPlan(plan: PartialPlan): TurnOutcome {
+        val outcome = if (plan.steps.size == 1) {
+            val step = plan.steps.single()
+            dispatch(
+                LocalMatch(command = step.command, requiresConfirmation = false, confirmationPrompt = "", spokenLabel = step.label),
+                researched = null,
+            )
+        } else {
+            executeLocal(
+                LocalMatch(
+                    command = LocalCommand.RunPlan(plan.steps),
+                    requiresConfirmation = false,
+                    confirmationPrompt = "",
+                    spokenLabel = "Doing ${plan.steps.size} steps",
+                ),
+            )
+        }
+        if (plan.leftover.isEmpty() || outcome !is TurnOutcome.LocalReady) return outcome
+        val hints = plan.leftover.mapNotNull { phoneActionHint(it) }
+        if (hints.size == plan.leftover.size) {
+            val reply = (listOf(outcome.reply) + hints.distinct()).joinToString(" ")
+            return TurnOutcome.LocalReady(reply)
+        }
+        val cloud = callCloud() as TurnOutcome.CloudReady
+        val reply = "${outcome.reply}\n\n${cloud.reply}"
+        return TurnOutcome.CloudReady(reply = reply, offline = cloud.offline, spoken = "${outcome.reply} ${cloud.spoken}")
+    }
+
     private suspend fun dispatch(
         match: LocalMatch?,
-        planned: List<PlanStep>?,
         researched: String?,
     ): TurnOutcome {
         if (match != null) {
@@ -147,20 +186,13 @@ class AssistantTurnProcessor(
             if (match.command is LocalCommand.WhatsAppCall) {
                 return prepareWhatsAppCall(match, requestPermission = true)
             }
+            if (match.command is LocalCommand.SendSms) {
+                return prepareSms(match, requestPermission = true)
+            }
             if (match.requiresConfirmation) {
                 return TurnOutcome.NeedsConfirmation(match)
             }
             return executeLocal(match)
-        }
-        if (!planned.isNullOrEmpty()) {
-            return executeLocal(
-                LocalMatch(
-                    command = LocalCommand.RunPlan(planned),
-                    requiresConfirmation = false,
-                    confirmationPrompt = "",
-                    spokenLabel = "Doing ${planned.size} steps",
-                ),
-            )
         }
         if (researched != null) return callResearch(researched)
         return callCloud()
@@ -196,6 +228,18 @@ class AssistantTurnProcessor(
                 }
                 placeResolvedCall(match, promptForCallPermission = true)
             }
+            is LocalCommand.SendSms -> {
+                if (!command.rawNumber && !tools.contactsGranted()) {
+                    return TurnOutcome.LocalReady(noteContactsPermissionDenied(command))
+                }
+                sendResolvedSms(match)
+            }
+            is LocalCommand.RunPlan -> {
+                if (!tools.contactsGranted()) {
+                    return TurnOutcome.LocalReady(noteContactsPermissionDenied(command))
+                }
+                executeLocal(match)
+            }
             else -> rememberReady("I couldn't continue that on this phone.", deviceOnly = true)
         }
     }
@@ -211,6 +255,7 @@ class AssistantTurnProcessor(
         return when (match.command) {
             is LocalCommand.WhatsAppCall -> placeWhatsAppCall(match, promptForCallPermission = false)
             is LocalCommand.CallContact -> placeResolvedCall(match, promptForCallPermission = false)
+            is LocalCommand.RunPlan -> executeLocal(match)
             else -> rememberReady("I couldn't continue that on this phone.", deviceOnly = true)
         }
     }
@@ -234,14 +279,16 @@ class AssistantTurnProcessor(
 
     suspend fun continueAfterNotificationPermission(match: LocalMatch): TurnOutcome {
         refreshMemoryGate()
-        if (!tools.notificationsGranted()) {
-            return TurnOutcome.LocalReady(noteNotificationDenied())
-        }
-        return executeLocal(match)
+        if (tools.notificationsGranted()) return executeLocal(match)
+        val outcome = executeLocal(match, promptForNotifications = false)
+        if (outcome !is TurnOutcome.LocalReady) return outcome
+        val note = "$NOTIFICATIONS_OFF_NOTE"
+        remember(note, deviceOnly = true)
+        return TurnOutcome.LocalReady("${outcome.reply} $note")
     }
 
     fun noteNotificationDenied(): String {
-        val reply = "I can't notify you without notification permission. Nothing was sent to the server."
+        val reply = NOTIFICATIONS_OFF_NOTE
         remember(reply, deviceOnly = true)
         return reply
     }
@@ -269,6 +316,8 @@ class AssistantTurnProcessor(
         val action = when (command) {
             is LocalCommand.WhatsAppCall -> "start a WhatsApp call"
             is LocalCommand.SendWhatsApp -> "open WhatsApp"
+            is LocalCommand.SendSms -> "open Messages"
+            is LocalCommand.RunPlan -> "run those steps"
             else -> "place a call"
         }
         val reply = "I can't look up contacts without permission, so I didn't $action. " +
@@ -355,6 +404,50 @@ class AssistantTurnProcessor(
                     requiresConfirmation = false,
                     confirmationPrompt = "",
                     spokenLabel = "Sending ${resolution.message} to ${resolution.displayName} on WhatsApp",
+                ),
+            )
+        }
+    }
+
+    private suspend fun prepareSms(match: LocalMatch, requestPermission: Boolean): TurnOutcome {
+        val command = match.command as? LocalCommand.SendSms
+            ?: return rememberReady("I couldn't open Messages on this phone.", deviceOnly = true)
+        if (!command.rawNumber && !tools.contactsGranted()) {
+            if (!requestPermission) {
+                return TurnOutcome.LocalReady(noteContactsPermissionDenied(command))
+            }
+            val name = ContactMatcher.displayQuery(command.nameQuery)
+            val explanation = "I need Contacts permission to find $name on this phone so I can open Messages. " +
+                "Allow contacts when Android asks. This stays on the device and is not sent to the server."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsContactsPermission(pending = match, explanation = explanation)
+        }
+        return sendResolvedSms(match)
+    }
+
+    private suspend fun sendResolvedSms(match: LocalMatch): TurnOutcome {
+        val command = match.command as? LocalCommand.SendSms
+            ?: return rememberReady("I couldn't open Messages on this phone.", deviceOnly = true)
+        if (!command.resolvedNumber.isNullOrBlank()) return executeLocal(match)
+        val resolution = try {
+            withContext(Dispatchers.IO) { tools.resolveSms(command) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            WhatsAppResolution.Speak("I couldn't look up contacts on this phone. Nothing was sent to the server.")
+        }
+        return when (resolution) {
+            is WhatsAppResolution.Speak -> rememberReady(resolution.message, deviceOnly = true)
+            is WhatsAppResolution.Ready -> executeLocal(
+                match.copy(
+                    command = command.copy(
+                        resolvedNumber = resolution.number,
+                        resolvedName = resolution.displayName,
+                        resolvedMessage = resolution.message,
+                    ),
+                    requiresConfirmation = false,
+                    confirmationPrompt = "",
+                    spokenLabel = "Texting ${resolution.displayName}",
                 ),
             )
         }
@@ -489,14 +582,18 @@ class AssistantTurnProcessor(
     private suspend fun executeLocal(
         match: LocalMatch,
         promptForCalendar: Boolean = true,
+        promptForNotifications: Boolean = true,
     ): TurnOutcome {
+        (match.command as? LocalCommand.RunPlan)?.let { plan ->
+            planPermissionOutcome(match, plan.steps)?.let { return it }
+        }
         if (promptForCalendar && match.command.needsCalendar() && !tools.calendarGranted()) {
             val explanation = "I need calendar permission to read and add events on this phone. " +
                 "Allow calendar when Android asks. Nothing is sent to the server."
             remember(explanation, deviceOnly = true)
             return TurnOutcome.NeedsCalendarPermission(pending = match, explanation = explanation)
         }
-        if (match.command.needsNotification() && !tools.notificationsGranted()) {
+        if (promptForNotifications && match.command.needsNotification() && !tools.notificationsGranted()) {
             val explanation = "I need notification permission so I can tell you on this phone. " +
                 "Allow notifications when Android asks. Nothing is sent to the server."
             remember(explanation, deviceOnly = true)
@@ -518,6 +615,31 @@ class AssistantTurnProcessor(
             is ToolResult.NeedsPhoto -> TurnOutcome.NeedsPhoto(reply, result.useBackend)
             else -> TurnOutcome.LocalReady(reply)
         }
+    }
+
+    /** Contacts and phone permission are asked before a plan starts, not mid-way. */
+    private fun planPermissionOutcome(match: LocalMatch, steps: List<PlanStep>): TurnOutcome? {
+        val commands = steps.map { it.command }
+        val needsContacts = commands.any {
+            (it is LocalCommand.CallContact && !it.rawNumber) ||
+                it is LocalCommand.SendWhatsApp ||
+                it is LocalCommand.WhatsAppCall ||
+                (it is LocalCommand.SendSms && !it.rawNumber)
+        }
+        if (needsContacts && !tools.contactsGranted()) {
+            val explanation = "I need Contacts permission to find people for these steps. " +
+                "Allow contacts when Android asks. The lookup stays on this device."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsContactsPermission(pending = match, explanation = explanation)
+        }
+        val needsCall = commands.any { it is LocalCommand.CallContact || it is LocalCommand.WhatsAppCall }
+        if (needsCall && !tools.callGranted()) {
+            val explanation = "I need phone-call permission for these steps. " +
+                "Allow phone calls when Android asks and I'll carry on."
+            remember(explanation, deviceOnly = true)
+            return TurnOutcome.NeedsCallPermission(pending = match, explanation = explanation)
+        }
+        return null
     }
 
     private suspend fun runPlan(steps: List<PlanStep>): TurnOutcome {
@@ -580,7 +702,9 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun refreshMemoryGate() {
-        memory.writesEnabled = settingsRepository.settings.first().memoryEnabled
+        val settings = settingsRepository.settings.first()
+        memory.writesEnabled = settings.memoryEnabled
+        memory.historyEnabled = settings.chatHistoryEnabled
     }
 
     private fun rememberReady(text: String, deviceOnly: Boolean): TurnOutcome {
@@ -613,17 +737,21 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun callCloud(): TurnOutcome {
-        val transcript = SessionMessageStore.snapshot()
-            .filter { it.role != MessageRole.System && !it.deviceOnly }
-            // Keep prompt size reasonable for MVP.
+        val history = SessionMessageStore.snapshot()
+            .filter { it.role != MessageRole.System && !it.deviceOnly && it.text.isNotBlank() }
             .takeLast(24)
+        val transcript = listOf(ChatMessage(role = MessageRole.System, text = KAI_SYSTEM_PROMPT)) + history
 
         val result = withContext(Dispatchers.IO) {
             api.sendChat(SessionMessageStore.SESSION_ID, transcript)
         }
-        val reply = result.reply
-        SessionMessageStore.add(ChatMessage(role = MessageRole.Assistant, text = reply))
+        val reply = if (result.ok) fixCantActReply(result.reply) else result.reply
+        SessionMessageStore.add(ChatMessage(role = MessageRole.Assistant, text = reply, deviceOnly = !result.ok))
         memory.recordTurn(role = "assistant", text = reply, allowSecret = false)
         return TurnOutcome.CloudReady(reply = reply, offline = result.offline || result.code == 503)
     }
 }
+
+private const val NOTIFICATIONS_OFF_NOTE =
+    "Notifications are off for KAI, so I'll ring and speak but won't show a notification. " +
+        "Turn notifications on in Settings to see them."

@@ -40,6 +40,8 @@ KAI_API_BASE_URL=http://10.0.2.2:8000
 
 The value is injected into `BuildConfig.KAI_API_BASE_URL` and used by `KaiApiClient`. Default if unset: `http://10.0.2.2:8000`.
 
+If the PC's Wi‑Fi address changes, the phone finds the backend again by itself: when a chat or research request can't connect, KAI probes the same port (normally 8000) on the phone's own Wi‑Fi subnet for a `/health` reply from `KAI Backend`, saves the address that answers and retries once. It tries the old address's last number first, scans at most 254 private (10.x, 172.16–31.x, 192.168.x) addresses for up to 6 seconds, never scans mobile data, and waits 30 seconds before scanning again after a miss. Settings → Backend shows the address in use and has **Find on this Wi‑Fi** and **Use build address** buttons.
+
 You do **not** need the backend for local phone commands (flashlight, battery, volume, settings intents, etc.). Cloud chat replies need `kai-backend` running with at least one provider key.
 
 ## Permissions

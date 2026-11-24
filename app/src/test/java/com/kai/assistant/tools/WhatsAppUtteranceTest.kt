@@ -60,7 +60,8 @@ class WhatsAppUtteranceTest {
     @Test
     fun unrelatedTextIsNotWhatsApp() {
         assertNull(WhatsAppUtterance.parse("call kaif"))
-        assertNull(WhatsAppUtterance.parse("send hi to mom"))
+        assertNull(WhatsAppUtterance.parse("send money to mom"))
+        assertNull(WhatsAppUtterance.parse("text me later"))
         assertNull(WhatsAppUtterance.parse("whatsapp"))
         assertNull(WhatsAppUtterance.parseCall("call kaif"))
         assertNull(WhatsAppUtterance.parse("call mohammed kaif on whatsapp"))

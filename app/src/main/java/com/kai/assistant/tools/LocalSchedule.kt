@@ -19,6 +19,7 @@ private const val REMINDERS = "reminders"
 private const val CHANNEL_ID = "kai_timers"
 private const val TIMER_NOTIFICATION = 7101
 private const val TIMER_REQUEST = 7101
+private val scheduleLock = Any()
 
 internal fun durationLabel(seconds: Int): String = when {
     seconds % 3600 == 0 -> {
@@ -63,6 +64,17 @@ class TimerScheduler(private val context: Context) {
         if (speak) SpokenAlert.speak(context, timerFinishedSpokenLine())
     }
 
+    fun cancel(): ToolResult {
+        val running = synchronized(lock) {
+            val end = prefs.getLong(TIMER_END, 0L)
+            prefs.edit().remove(TIMER_END).apply()
+            alarms.cancel(timerIntent())
+            context.getSystemService(NotificationManager::class.java).cancel(TIMER_NOTIFICATION)
+            end > System.currentTimeMillis()
+        }
+        return ToolResult.Ok(if (running) "Timer cancelled." else "There's no timer running.")
+    }
+
     fun finish(onSpoken: () -> Unit = {}) {
         val speak = synchronized(lock) { finishLocked() }
         if (speak) SpokenAlert.speak(context, timerFinishedSpokenLine(), onSpoken) else onSpoken()
@@ -76,13 +88,7 @@ class TimerScheduler(private val context: Context) {
     }
 
     private fun schedule(end: Long) {
-        val pending = timerIntent()
-        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()
-        if (canExact) {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, end, pending)
-        } else {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, end, pending)
-        }
+        scheduleWake(alarms, end, timerIntent())
     }
 
     private fun timerIntent(): PendingIntent {
@@ -154,18 +160,22 @@ data class StoredReminder(
     val weekday: Int? = null,
 )
 
+/** Receivers and the app write the same list; every read-modify-write holds [scheduleLock]. */
 class ReminderStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun all(): List<StoredReminder> {
+    fun all(): List<StoredReminder> = synchronized(scheduleLock) { allLocked() }
+
+    private fun allLocked(): List<StoredReminder> {
         val raw = prefs.getString(REMINDERS, "").orEmpty()
         if (raw.isBlank()) return emptyList()
         return raw.lineSequence().mapNotNull { line -> decodeReminder(line) }.toList()
     }
 
-    fun add(spec: ReminderSpec): StoredReminder {
+    fun add(spec: ReminderSpec): StoredReminder = synchronized(scheduleLock) {
         val clean = spec.text.replace('\n', ' ').replace('\t', ' ').trim()
-        val next = (all().maxOfOrNull { it.id } ?: 0) + 1
+        val current = allLocked()
+        val next = (current.maxOfOrNull { it.id } ?: 0) + 1
         val created = StoredReminder(
             id = next,
             text = clean,
@@ -175,16 +185,16 @@ class ReminderStore(context: Context) {
             repeat = spec.repeat,
             weekday = spec.weekday,
         )
-        save(all() + created)
-        return created
+        save(current + created)
+        created
     }
 
-    fun replace(updated: StoredReminder) {
-        save(all().map { if (it.id == updated.id) updated else it })
+    fun replace(updated: StoredReminder) = synchronized(scheduleLock) {
+        save(allLocked().map { if (it.id == updated.id) updated else it })
     }
 
-    fun remove(id: Int) {
-        save(all().filterNot { it.id == id })
+    fun remove(id: Int) = synchronized(scheduleLock) {
+        save(allLocked().filterNot { it.id == id })
     }
 
     private fun save(items: List<StoredReminder>) {
@@ -414,47 +424,64 @@ class LocalClockAlarmScheduler(private val context: Context) {
         repeat: ReminderRepeat,
         weekday: Int?,
         spoken: String,
+        dayOffset: Int = 0,
     ): ToolResult {
-        val at = firstClockMillis(hour, minute, repeat, weekday)
-        val id = (all().maxOfOrNull { it.id } ?: 0) + 1
-        val saved = StoredClockAlarm(id, at, hour, minute, message, repeat, weekday)
-        save(all() + saved)
+        val at = firstClockMillis(hour, minute, repeat, weekday, dayOffset)
+        val saved = synchronized(scheduleLock) {
+            val current = all()
+            val id = (current.maxOfOrNull { it.id } ?: 0) + 1
+            StoredClockAlarm(id, at, hour, minute, message, repeat, weekday).also { save(current + it) }
+        }
         scheduleOne(saved)
         return ToolResult.Ok(spoken)
     }
 
+    /** After a reboot: one-time alarms that already passed go; repeating ones move to their next ring. */
     fun restore() {
         val now = System.currentTimeMillis()
-        val kept = mutableListOf<StoredClockAlarm>()
-        all().forEach { alarm ->
-            if (alarm.atMillis <= now) {
-                cancelPending(alarm.id)
-            } else {
-                scheduleOne(alarm)
-                kept += alarm
+        val zone = java.time.ZoneId.systemDefault()
+        val kept = synchronized(scheduleLock) {
+            val kept = all().mapNotNull { alarm ->
+                when {
+                    alarm.atMillis > now -> alarm
+                    alarm.repeat == ReminderRepeat.Once -> {
+                        cancelPending(alarm.id)
+                        null
+                    }
+                    else -> {
+                        var next = alarm.atMillis
+                        while (next <= now) {
+                            next = nextRepeatMillis(next, zone, alarm.hour, alarm.minute, alarm.repeat, alarm.weekday)
+                        }
+                        alarm.copy(atMillis = next)
+                    }
+                }
             }
+            save(kept)
+            kept
         }
-        save(kept)
+        kept.forEach { scheduleOne(it) }
     }
 
     /** Advances a repeating alarm after it rings. A one-time alarm is removed. */
     fun onFired(id: Int) {
-        val alarm = all().firstOrNull { it.id == id } ?: return
-        if (alarm.atMillis > System.currentTimeMillis() + 15_000) return
-        if (alarm.repeat == ReminderRepeat.Once) {
-            save(all().filterNot { it.id == id })
-            return
+        val updated = synchronized(scheduleLock) {
+            val alarm = all().firstOrNull { it.id == id } ?: return
+            if (alarm.atMillis > System.currentTimeMillis() + 15_000) return
+            if (alarm.repeat == ReminderRepeat.Once) {
+                save(all().filterNot { it.id == id })
+                return
+            }
+            val next = nextRepeatMillis(
+                afterMillis = alarm.atMillis,
+                zone = java.time.ZoneId.systemDefault(),
+                hour24 = alarm.hour,
+                minute = alarm.minute,
+                repeat = alarm.repeat,
+                weekday = alarm.weekday,
+            )
+            alarm.copy(atMillis = next).also { next -> save(all().map { if (it.id == id) next else it }) }
         }
-        val next = nextRepeatMillis(
-            afterMillis = alarm.atMillis,
-            zone = java.time.ZoneId.systemDefault(),
-            hour24 = alarm.hour,
-            minute = alarm.minute,
-            repeat = alarm.repeat,
-            weekday = alarm.weekday,
-        )
-        val updated = alarm.copy(atMillis = next)
-        save(all().map { if (it.id == id) updated else it })
         scheduleOne(updated)
     }
 
@@ -546,9 +573,11 @@ class LocalClockAlarmScheduler(private val context: Context) {
         prefs.edit().putString(CLOCK_ALARMS, raw).apply()
     }
 
-    private fun firstClockMillis(hour: Int, minute: Int, rule: ReminderRepeat, weekday: Int?): Long {
+    private fun firstClockMillis(hour: Int, minute: Int, rule: ReminderRepeat, weekday: Int?, dayOffset: Int): Long {
         val zone = java.time.ZoneId.systemDefault()
-        var at = nextReminderMillis(System.currentTimeMillis(), zone, hour, minute, null)
+        val exactHour = if (hour >= 12) "pm" else "am"
+        val clockHour = if (hour % 12 == 0) 12 else hour % 12
+        var at = nextReminderMillis(System.currentTimeMillis(), zone, clockHour, minute, exactHour, dayOffset)
         if (rule == ReminderRepeat.Once || rule == ReminderRepeat.Daily) return at
         for (step in 0 until 8) {
             val day = java.time.Instant.ofEpochMilli(at).atZone(zone).dayOfWeek

@@ -18,7 +18,7 @@ class PhoneActionsTest {
 
         val timer = router.match("set a timer for 5 minutes")
         assertEquals(LocalCommand.StartTimer(300, "KAI timer"), timer!!.command)
-        assertTrue(timer.requiresConfirmation)
+        assertFalse(timer.requiresConfirmation)
         assertTrue(timer.command.staysOnDevice())
 
         val reminder = router.match("remind me to call the supplier at 7")
@@ -110,8 +110,6 @@ class PhoneActionsTest {
         assertEquals(LocalCommand.SetAlarm(18, 27, "KAI alarm"), match!!.command)
         assertTrue(match.command.staysOnDevice())
         assertEquals("Alarm set for 6:27 p.m.", alarmSpokenLine(18, 27))
-        assertEquals(AlarmSetPath.SilentClock, alarmSetPath(exportedSilentClock = true))
-        assertEquals(AlarmSetPath.AlarmClock, alarmSetPath(exportedSilentClock = false))
     }
 
     @Test

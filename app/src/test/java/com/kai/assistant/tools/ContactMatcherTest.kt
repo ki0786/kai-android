@@ -33,15 +33,22 @@ class ContactMatcherTest {
     }
 
     @Test
-    fun substringIsNotAMatch() {
-        val result = ContactMatcher.match(
+    fun clippedNamePicksTheClosestButADifferentSoundDoesNot() {
+        val clipped = ContactMatcher.match(
             "kai",
             listOf(ContactPhone(1, "Kaif", "111", PhoneKind.Mobile)),
             preferredKind = null,
         )
+        assertEquals("Kaif", (clipped as ContactMatchResult.One).displayName)
+
+        val result = ContactMatcher.match(
+            "tom",
+            listOf(ContactPhone(1, "Mom", "111", PhoneKind.Mobile)),
+            preferredKind = null,
+        )
         assertTrue(result is ContactMatchResult.None)
         assertEquals(
-            "I couldn't find a contact named Kai on this phone.",
+            "I couldn't find a contact named Tom on this phone.",
             ContactMatcher.describe(result),
         )
     }

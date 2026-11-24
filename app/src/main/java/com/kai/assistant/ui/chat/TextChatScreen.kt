@@ -178,13 +178,7 @@ fun TextChatScreen(
         notificationRequest = null
         sending = true
         scope.launch {
-            val outcome = if (granted) {
-                processor.continueAfterNotificationPermission(match)
-            } else {
-                processor.noteNotificationDenied()
-                null
-            }
-            applyCallOutcome(outcome)
+            applyCallOutcome(processor.continueAfterNotificationPermission(match))
             sending = false
         }
     }
@@ -299,7 +293,7 @@ fun TextChatScreen(
                         pending = null
                         sending = true
                         scope.launch {
-                            processor.confirmAndExecute(confirmed)
+                            applyCallOutcome(processor.confirmAndExecute(confirmed))
                             sending = false
                         }
                     },

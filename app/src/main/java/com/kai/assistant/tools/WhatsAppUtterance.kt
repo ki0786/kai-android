@@ -18,11 +18,29 @@ object WhatsAppUtterance {
     private val whatsAppFirst = Regex(
         """^(?:please\s+)?whats\s?app\s+(.+)$""",
     )
+    private val sendNoApp = Regex(
+        """^(?:send|message|text)\s+(.+?)\s+to\s+(.+)$""",
+    )
+    private val sendToSaying = Regex(
+        """^send\s+(?:an?\s+)?(?:whatsapp\s+)?(?:message|text|msg|whatsapp)\s+to\s+(.+?)\s+(?:saying|that says|that|:)\s+(.+)$""",
+    )
+    private val sendToOnly = Regex(
+        """^send\s+(?:an?\s+)?(?:whatsapp\s+)?(?:message|text|whatsapp)\s+to\s+(.+)$""",
+    )
+    private val messageFirstNoApp = Regex("""^(?:message|text)\s+(.+)$""")
+    private val tellThat = Regex("""^tell\s+(.+?)\s+that\s+(.+)$""")
+    private val tellOnApp = Regex("""^tell\s+(.+)\s+(?:on|via|using|through)\s+whatsapp$""")
+    private val openChat = Regex(
+        """^open\s+(?:the\s+)?(?:whatsapp\s+)?chat\s+(?:with|of|for)\s+(.+)$|^open\s+(.+?)'s\s+(?:whatsapp\s+)?chat$""",
+    )
+    private val goodsNotText = Regex(
+        """\b(money|rupees?|rs|inr|₹|payment|paisa|cash|dollars?|location|photo|photos|picture|pic|file|document|pdf|contact|video)\b""",
+    )
     private val nameWord = Regex("""^\p{L}[\p{L}.'’\-]*$""")
     private val notAName = setOf(
         "me", "you", "him", "her", "them", "us", "it", "someone", "somebody",
         "anyone", "everybody", "a", "an", "the", "to", "on", "via", "whatsapp",
-        "message", "text", "send",
+        "message", "text", "send", "my", "from", "for", "with", "of", "in", "this", "that",
     )
 
     data class Call(val nameQuery: String, val video: Boolean)
@@ -48,6 +66,9 @@ object WhatsAppUtterance {
     private val voiceFirst = Regex(
         """^(?:please\s+)?whats\s?app\s+(?:voice\s+)?(?:call|phone)\s+(.+)$""",
     )
+    private val videoNoApp = Regex(
+        """^(?:(?:make|start|do|place)\s+a\s+)?video\s+call\s+(?:to\s+|with\s+)?(.+)$""",
+    )
     private val leadIn = Regex("""^(?:please|can you|could you|would you|will you)\s+""")
 
     fun parse(normalizedText: String): Parsed? {
@@ -59,12 +80,71 @@ object WhatsAppUtterance {
             if (message.isEmpty() || !isContactName(name)) return null
             return Parsed(listOf(Option(name, message)))
         }
+        tellOnApp.find(text)?.let { match ->
+            val tail = match.groupValues[1].trim()
+            tellThat.find("tell $tail")?.let { that -> return single(that.groupValues[1], that.groupValues[2]) }
+            return splitNameAndMessage(tail).takeIf { it.isNotEmpty() }?.let { Parsed(it) }
+        }
         val tail = whatsAppFirst.find(text)?.groupValues?.get(1)?.trim().orEmpty()
-        if (tail.isEmpty()) return null
-        val options = splitNameAndMessage(tail)
-        if (options.isEmpty()) return null
-        return Parsed(options)
+        if (tail.isNotEmpty()) {
+            Regex("""^chat\s+(?:with\s+|of\s+|for\s+)?(.+)$""").find(tail)?.let { chat ->
+                val name = chat.groupValues[1].trim()
+                if (isContactName(name)) return Parsed(listOf(Option(name, "")))
+            }
+            val options = splitNameAndMessage(tail.removePrefix("to ").trim(), allowEmpty = true)
+            if (options.isEmpty()) return null
+            return Parsed(options)
+        }
+        return parseWithoutApp(text)
     }
+
+    /**
+     * Messages that don't name an app go to WhatsApp, the messenger this phone's
+     * owner uses. "SMS" and "text message" go to [SmsUtterance] first.
+     */
+    private fun parseWithoutApp(text: String): Parsed? {
+        openChat.find(text)?.let { match ->
+            val name = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+            return if (isContactName(name)) Parsed(listOf(Option(name, ""))) else null
+        }
+        sendToSaying.find(text)?.let { match ->
+            return single(match.groupValues[1], match.groupValues[2])
+        }
+        sendToOnly.find(text)?.let { match ->
+            val tail = match.groupValues[1].trim()
+            return splitNameAndMessage(tail, allowEmpty = true).takeIf { it.isNotEmpty() }?.let { Parsed(it) }
+        }
+        tellThat.find(text)?.let { match ->
+            return single(match.groupValues[1], match.groupValues[2])
+        }
+        val options = mutableListOf<Option>()
+        sendNoApp.find(text)?.let { match ->
+            val message = match.groupValues[1].trim()
+            val name = match.groupValues[2].trim()
+            if (text.startsWith("send") && goodsNotText.containsMatchIn(message)) return null
+            if (message.isNotEmpty() && isContactName(name)) options += Option(name, message)
+        }
+        if (!text.startsWith("send")) {
+            messageFirstNoApp.find(text)?.let { match ->
+                options += splitNameAndMessage(match.groupValues[1].trim())
+            }
+        }
+        val cleaned = options.map { it.copy(message = cleanMessage(it.message)) }.filter { it.message.isNotEmpty() }
+        return cleaned.distinct().ifEmpty { null }?.let { Parsed(it) }
+    }
+
+    private fun single(rawName: String, rawMessage: String): Parsed? {
+        val name = rawName.trim()
+        val message = cleanMessage(rawMessage)
+        if (message.isEmpty() || !isContactName(name)) return null
+        return Parsed(listOf(Option(name, message)))
+    }
+
+    private fun cleanMessage(raw: String): String =
+        raw.trim()
+            .replace(Regex("""^(?:and\s+)?(?:tell|ask)\s+(?:him|her|them)\s+(?:that\s+)?"""), "")
+            .replace(Regex("""^(?:saying|that says|that|:)\s+"""), "")
+            .trim()
 
     fun parseCall(normalizedText: String): Call? {
         val text = normalize(normalizedText)
@@ -90,6 +170,9 @@ object WhatsAppUtterance {
         voiceFirst.find(text)?.let { match ->
             return callOrNull(match.groupValues[1], video = false)
         }
+        videoNoApp.find(text)?.let { match ->
+            return callOrNull(match.groupValues[1].removeSuffix(" now").trim(), video = true)
+        }
         return null
     }
 
@@ -114,15 +197,21 @@ object WhatsAppUtterance {
         """^(?:noir|noor|nah|now)\s+(?=(?:video\s+)?(?:call|phone|message|text|send|open)\b)""",
     )
 
-    fun splitNameAndMessage(tail: String): List<Option> {
+    /**
+     * Every way to read "<name> <message>", longest name first. With [allowEmpty] the
+     * whole tail is also tried as a name with no message, which only opens the chat.
+     */
+    fun splitNameAndMessage(tail: String, allowEmpty: Boolean = false): List<Option> {
         val tokens = tail.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (tokens.size < 2) return emptyList()
+        if (tokens.isEmpty()) return emptyList()
         val maxNameWords = minOf(4, tokens.size - 1)
-        return (maxNameWords downTo 1).mapNotNull { count ->
+        val split = (maxNameWords downTo 1).mapNotNull { count ->
             val name = tokens.take(count).joinToString(" ")
-            val message = tokens.drop(count).joinToString(" ")
+            val message = cleanMessage(tokens.drop(count).joinToString(" "))
             if (message.isBlank() || !isContactName(name)) null else Option(name, message)
         }
+        val whole = tokens.joinToString(" ")
+        return if (allowEmpty && tokens.size <= 4 && isContactName(whole)) split + Option(whole, "") else split
     }
 
     fun isContactName(target: String): Boolean {
@@ -155,12 +244,16 @@ sealed class WhatsAppCallResolution {
 }
 
 object WhatsAppResolver {
-    fun resolve(options: List<WhatsAppUtterance.Option>, phones: List<ContactPhone>): WhatsAppResolution {
+    fun resolve(
+        options: List<WhatsAppUtterance.Option>,
+        phones: List<ContactPhone>,
+        app: String = "WhatsApp",
+    ): WhatsAppResolution {
         if (options.isEmpty()) {
-            return WhatsAppResolution.Speak("I need a name and a message to open WhatsApp.")
+            return WhatsAppResolution.Speak("I need a name and a message to open $app.")
         }
-        for (option in options) {
-            when (val matched = matchOne(option.nameQuery, phones, "so I didn't open WhatsApp")) {
+        for (option in rankByContact(options, phones)) {
+            when (val matched = matchOne(option.nameQuery, phones, "so I didn't open $app")) {
                 is Hit.Ready -> return WhatsAppResolution.Ready(
                     displayName = matched.displayName,
                     number = matched.number,
@@ -172,6 +265,22 @@ object WhatsAppResolver {
             }
         }
         return WhatsAppResolution.Speak(ContactMatcher.describe(ContactMatchResult.None(options.first().nameQuery)))
+    }
+
+    /**
+     * Readings whose name sounds most like a saved contact come first, so
+     * "message Kaif come home" beats reading "come home" as the name.
+     * Equal scores keep the parser's order, which tries longer names first.
+     */
+    fun rankByContact(
+        options: List<WhatsAppUtterance.Option>,
+        phones: List<ContactPhone>,
+    ): List<WhatsAppUtterance.Option> {
+        if (options.size < 2) return options
+        return options
+            .mapIndexed { index, option -> Triple(index, option, ContactMatcher.bestScore(option.nameQuery, phones)) }
+            .sortedWith(compareByDescending<Triple<Int, WhatsAppUtterance.Option, Double>> { it.third }.thenBy { it.first })
+            .map { it.second }
     }
 
     fun resolveContact(nameQuery: String, phones: List<ContactPhone>): WhatsAppCallResolution {

@@ -20,8 +20,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-    <!-- Lets an exported clock accept ACTION_SET_ALARM. Granted at install when the clock defines it. -->
-    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
@@ -55,20 +53,12 @@
             <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.SET_ALARM" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SHOW_ALARMS" />
-        </intent>
-        <package android:name="com.android.BBKClock" />
-        <package android:name="com.google.android.deskclock" />
-        <package android:name="com.android.deskclock" />
-        <intent>
-            <action android:name="android.intent.action.SET_TIMER" />
-        </intent>
-        <intent>
             <action android:name="android.intent.action.CALL" />
             <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
         </intent>
         <intent>
             <action android:name="android.intent.action.SEND" />
