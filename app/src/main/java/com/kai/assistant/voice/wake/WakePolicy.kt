@@ -66,7 +66,42 @@ internal const val HEY_KAI_PHRASE = "HEYKAI"
  */
 internal const val HEY_KAI_TOKENS = "▁HE Y ▁K A I"
 
-internal const val KEYWORD_BOOST = 1.5f
+/**
+ * Spellings of "hey kai" that this GigaSpeech token list can represent.
+ * The first is the clear TTS path. The others are how the same words come
+ * out of a phone mic: no pause, "hi" or "hai" for hey, and "kai" as
+ * `K Y` (the same diphthong piece as "hey"), `K A Y`, `CA I`, or `K E`.
+ * Every piece is in tokens.txt. A missing piece aborts the process.
+ */
+internal val HEY_KAI_SPELLINGS: List<String> = listOf(
+    "▁HE Y ▁K A I",
+    "▁HE Y K A I",
+    "▁HI ▁K A I",
+    "▁HI ▁K A Y",
+    "▁HE Y ▁K Y",
+    "▁HE Y K Y",
+    "▁HE Y ▁K A Y",
+    "▁HE Y ▁K E",
+    "▁HE Y ▁CA I",
+    "▁HA I ▁K A I",
+    "▁HE ▁K A I",
+)
+
+/**
+ * Boost applied to each keyword token so the path stays in the beam.
+ * 1.5 kept studio TTS and dropped a live voice. 3.0 is the value the
+ * sherpa C API uses when a keyword is hard to keep.
+ */
+internal const val KEYWORD_BOOST = 3.0f
+
+/** Log a miss at most this often while speech is coming in. */
+internal const val KEYWORD_MISS_LOG_MS = 2_000L
+
+/**
+ * RMS of 16 kHz float samples (`pcm / 32768`) above which a chunk counts as
+ * speech for the miss log. Quiet-room noise stays under this.
+ */
+internal const val KEYWORD_MISS_RMS = 0.015f
 
 /** Persistent foreground notification while the wake microphone is open. */
 internal const val LISTENING_NOTIFICATION = "KAI is listening for 'Hey KAI'"
@@ -175,30 +210,60 @@ internal object WakeModelSpec {
 
 /**
  * Higher sensitivity lowers the sherpa trigger threshold (easier to fire).
- * 0 → 0.45, 0.5 → 0.25 (sherpa's usual default), 1 → 0.05.
+ * 0 → 0.15, 0.5 → 0.10, 1 → 0.05. The old default (0.25) caught studio TTS
+ * and missed a live voice.
  */
 internal fun keywordsThreshold(sensitivity: Float): Float {
     val clamped = sensitivity.coerceIn(0f, 1f)
-    return 0.45f - clamped * 0.40f
+    return 0.15f - clamped * 0.10f
 }
 
 internal fun heyKaiKeywordLine(sensitivity: Float): String {
     val threshold = keywordsThreshold(sensitivity)
     // `@` must be a single whitespace-delimited word. A space after it is
     // another token, and sherpa looks that token up in tokens.txt.
-    return "%s :%.2f #%.2f @%s".format(
-        Locale.US,
-        HEY_KAI_TOKENS,
-        KEYWORD_BOOST,
-        threshold,
-        HEY_KAI_PHRASE,
-    )
+    // One line per spelling. The same tokens cannot carry two thresholds.
+    return HEY_KAI_SPELLINGS.joinToString("\n") { tokens ->
+        "%s :%.2f #%.2f @%s".format(
+            Locale.US,
+            tokens,
+            KEYWORD_BOOST,
+            threshold,
+            HEY_KAI_PHRASE,
+        )
+    }
 }
+
+internal fun pcmRms(samples: FloatArray): Float {
+    if (samples.isEmpty()) return 0f
+    var sum = 0.0
+    for (sample in samples) sum += sample.toDouble() * sample.toDouble()
+    return kotlin.math.sqrt(sum / samples.size).toFloat()
+}
+
+/**
+ * Sherpa only returns a keyword once its acoustic score clears the threshold,
+ * so a miss has no finer number than that bound. Null when the chunk is quiet
+ * or a miss was logged a moment ago.
+ */
+internal fun keywordMissLog(
+    nowMs: Long,
+    lastLogMs: Long,
+    rms: Float,
+    threshold: Float,
+): String? {
+    if (rms < KEYWORD_MISS_RMS) return null
+    if (nowMs - lastLogMs < KEYWORD_MISS_LOG_MS) return null
+    return "Hey KAI miss score<%.2f rms=%.3f".format(Locale.US, threshold, rms)
+}
+
+internal fun keywordHitLog(threshold: Float, tokens: String): String =
+    "Hey KAI hit score>=%.2f tokens=%s".format(Locale.US, threshold, tokens)
 
 internal fun isHeyKaiSpot(result: String): Boolean {
     val text = result.trim()
     if (text.isEmpty()) return false
-    if (text.contains(HEY_KAI_TOKENS)) return true
+    if (HEY_KAI_SPELLINGS.any { text.contains(it) }) return true
     val norm = text.lowercase(Locale.US)
     return norm == "hey kai" ||
         norm == "heykai" ||

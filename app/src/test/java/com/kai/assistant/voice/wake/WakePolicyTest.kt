@@ -128,21 +128,46 @@ class WakePolicyTest {
 
     @Test
     fun sensitivityMapsOntoTheTriggerThreshold() {
-        assertEquals(0.45f, keywordsThreshold(0f), 0.001f)
-        assertEquals(0.25f, keywordsThreshold(0.5f), 0.001f)
+        assertEquals(0.15f, keywordsThreshold(0f), 0.001f)
+        assertEquals(0.10f, keywordsThreshold(0.5f), 0.001f)
         assertEquals(0.05f, keywordsThreshold(1f), 0.001f)
-        assertEquals(0.45f, keywordsThreshold(-2f), 0.001f)
+        assertEquals(0.15f, keywordsThreshold(-2f), 0.001f)
         assertEquals(0.05f, keywordsThreshold(4f), 0.001f)
     }
 
     @Test
     fun keywordLineIsTheHeyKaiTokens() {
         val line = heyKaiKeywordLine(0.5f)
-        assertTrue(line.startsWith("$HEY_KAI_TOKENS "))
-        assertTrue(line.contains(":1.50"))
-        assertTrue(line.contains("#0.25"))
+        assertTrue(line.startsWith("$HEY_KAI_TOKENS :3.00 #0.10 @HEYKAI"))
+        assertTrue(line.contains("▁HE Y K A I :3.00 #0.10 @HEYKAI"))
+        assertTrue(line.contains("▁HI ▁K A I :3.00 #0.10 @HEYKAI"))
+        assertTrue(line.contains("▁HE Y ▁CA I :3.00 #0.10 @HEYKAI"))
+        assertTrue(line.contains("▁HA I ▁K A I :3.00 #0.10 @HEYKAI"))
         assertTrue(line.endsWith("@HEYKAI"))
+        assertEquals(HEY_KAI_SPELLINGS.size, line.lines().size)
         assertFalse(line.contains(","))
+        val allowed = setOf("▁HE", "Y", "▁K", "K", "A", "I", "▁HI", "▁CA", "▁HA", "E")
+        for (spelling in HEY_KAI_SPELLINGS) {
+            val pieces = spelling.split(" ")
+            assertTrue(pieces.size >= 4)
+            assertTrue(pieces.all { it in allowed })
+            assertTrue(isHeyKaiSpot(spelling))
+        }
+    }
+
+    @Test
+    fun missLogShowsTheScoreBoundWhileSpeechIsPresent() {
+        assertEquals(null, keywordMissLog(nowMs = 5_000, lastLogMs = 0, rms = 0.005f, threshold = 0.10f))
+        assertEquals(null, keywordMissLog(nowMs = 5_000, lastLogMs = 4_000, rms = 0.04f, threshold = 0.10f))
+        assertEquals(
+            "Hey KAI miss score<0.10 rms=0.040",
+            keywordMissLog(nowMs = 5_000, lastLogMs = 1_000, rms = 0.04f, threshold = 0.10f),
+        )
+        assertEquals("Hey KAI hit score>=0.10 tokens=▁HE Y ▁K A I", keywordHitLog(0.10f, HEY_KAI_TOKENS))
+        val quiet = FloatArray(1600)
+        assertTrue(pcmRms(quiet) < KEYWORD_MISS_RMS)
+        val speech = FloatArray(1600) { 0.05f }
+        assertTrue(pcmRms(speech) >= KEYWORD_MISS_RMS)
     }
 
     @Test

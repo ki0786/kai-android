@@ -1,5 +1,6 @@
 package com.kai.assistant.voice.wake
 
+import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
@@ -20,6 +21,8 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
 
     @Volatile
     private var pendingSensitivity: Float? = null
+
+    private var lastMissLogMs: Long = 0L
 
     override fun load(modelDir: File, sensitivity: Float) {
         synchronized(lock) {
@@ -49,11 +52,14 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
                     provider = "cpu",
                     modelType = "zipformer2",
                 ),
-                maxActivePaths = 4,
+                maxActivePaths = 8,
                 keywordsFile = keywords.path,
                 keywordsScore = KEYWORD_BOOST,
                 keywordsThreshold = keywordsThreshold(this.sensitivity),
-                numTrailingBlanks = 2,
+                // Need more trailing blanks than this. 1 lets a short live
+                // pause finish the keyword; 2 needed a cleaner gap than a
+                // phone mic usually leaves after speech.
+                numTrailingBlanks = 1,
             )
             spotter = KeywordSpotter(assetManager = null, config = config)
             openStreamLocked()
@@ -71,13 +77,35 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
             val active = stream ?: return false
             val engine = spotter ?: return false
             active.acceptWaveform(samples, SAMPLE_RATE)
+            var hit = false
             while (engine.isReady(active)) {
                 engine.decode(active)
-                val keyword = engine.getResult(active).keyword
+                val result = engine.getResult(active)
+                val keyword = result.keyword
                 if (keyword.isNotBlank()) {
+                    val tokens = result.tokens.joinToString(" ")
                     engine.reset(active)
-                    if (isHeyKaiSpot(keyword)) return true
+                    if (isHeyKaiSpot(keyword) || isHeyKaiSpot(tokens)) {
+                        Log.i(
+                            TAG,
+                            keywordHitLog(
+                                keywordsThreshold(sensitivity),
+                                tokens.ifBlank { keyword },
+                            ),
+                        )
+                        hit = true
+                    } else {
+                        Log.i(TAG, "Hey KAI ignored $keyword tokens=$tokens")
+                    }
                 }
+            }
+            if (hit) return true
+            val threshold = keywordsThreshold(sensitivity)
+            val now = System.currentTimeMillis()
+            val miss = keywordMissLog(now, lastMissLogMs, pcmRms(samples), threshold)
+            if (miss != null) {
+                lastMissLogMs = now
+                Log.i(TAG, miss)
             }
             return false
         }
@@ -126,5 +154,6 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
 
     private companion object {
         const val SAMPLE_RATE = 16000
+        const val TAG = "HeyKai"
     }
 }
