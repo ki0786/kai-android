@@ -206,8 +206,8 @@ class BooksEngine(
         if (action.amount <= 0) return BooksOutcome(snapshot, "I need the bill amount.")
         val label = titleParty(action.label).ifBlank { action.kind.label }
         val bill = Bill(ids(), action.kind, label, action.amount, action.dueEpochMs, paid = false)
-        val spoken = "Saved on this phone. $label bill ${formatRupees(action.amount)}, " +
-            "due on ${formatDueDate(action.dueEpochMs, zone)}. I will not pay it."
+        val whenDue = action.dueEpochMs?.let { ", due on ${formatDueDate(it, zone)}" }.orEmpty()
+        val spoken = "Saved on this phone. $label bill ${formatRupees(action.amount)}$whenDue. I will not pay it."
         return BooksOutcome(snapshot.copy(bills = snapshot.bills + bill), spoken)
     }
 

@@ -464,11 +464,15 @@ private fun BillsSection(
         OutlinedTextField(value = label, onValueChange = { label = it }, label = { Text("What bill") }, modifier = Modifier.fillMaxWidth())
     }
     OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount") }, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(value = day, onValueChange = { day = it }, label = { Text("Due day") }, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(value = day, onValueChange = { day = it }, label = { Text("Due day, optional") }, modifier = Modifier.fillMaxWidth())
     Button(onClick = {
         val rupees = amount.filter { it.isDigit() }.toLongOrNull() ?: return@Button
-        val dueDay = day.filter { it.isDigit() }.toIntOrNull() ?: return@Button
-        val due = dueOnDayOfMonth(dueDay, ZonedDateTime.now(zone)) ?: return@Button
+        val dueDay = day.filter { it.isDigit() }.toIntOrNull()
+        val due = if (dueDay == null) {
+            null
+        } else {
+            dueOnDayOfMonth(dueDay, ZonedDateTime.now(zone)) ?: return@Button
+        }
         val name = if (kind == BillKind.OTHER) label else kind.label
         save(BooksAction.Bill(kind, name, rupees, due))
         amount = ""
@@ -477,8 +481,9 @@ private fun BillsSection(
     }) { Text("Save bill") }
     snapshot.bills.asReversed().forEach { bill ->
         val state = dueState(bill.dueEpochMs, bill.paid, now, zone)
+        val whenDue = bill.dueEpochMs?.let { formatDueDate(it, zone) } ?: "no date"
         Text(
-            "${bill.label} · ${formatRupees(bill.amount)} · ${formatDueDate(bill.dueEpochMs, zone)} · ${state.name.lowercase().replace('_', ' ')}",
+            "${bill.label} · ${formatRupees(bill.amount)} · $whenDue · ${state.name.lowercase().replace('_', ' ')}",
             color = if (state == DueState.OVERDUE) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
         )
         if (!bill.paid) {

@@ -147,14 +147,15 @@ private fun Bill.toJson(): JSONObject = JSONObject()
     .put("kind", kind.name)
     .put("label", label)
     .put("amount", amount)
-    .put("due", dueEpochMs)
+    .put("due", dueEpochMs ?: JSONObject.NULL)
     .put("paid", paid)
 
 private fun billFromJson(json: JSONObject): Bill? {
     val id = json.optString("id")
     if (id.isBlank()) return null
     val kind = enumOrNull<BillKind>(json.optString("kind")) ?: return null
-    return Bill(id, kind, json.optString("label"), json.optLong("amount"), json.optLong("due"), json.optBoolean("paid"))
+    val due = if (!json.has("due") || json.isNull("due")) null else json.optLong("due")
+    return Bill(id, kind, json.optString("label"), json.optLong("amount"), due, json.optBoolean("paid"))
 }
 
 private inline fun <T> List<T>.toJson(encode: (T) -> JSONObject): JSONArray {

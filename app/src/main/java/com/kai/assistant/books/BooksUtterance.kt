@@ -110,10 +110,25 @@ object BooksUtterance {
             return BooksAction.Bill(BillKind.OTHER, titleParty(other.groups["label"]?.value.orEmpty()), amount, due)
         }
         val named = Regex("""^(?<label>.+?)\s+bill\s+$AMOUNT\s+due\s+on\s+(?:the\s+)?$DAY$""").matchEntire(text)
+        if (named != null) {
+            val amount = amount(named) ?: return null
+            val due = dueDay(named, now) ?: return null
+            return BooksAction.Bill(BillKind.OTHER, titleParty(named.groups["label"]?.value.orEmpty()), amount, due)
+        }
+        return bareBill(text)
+    }
+
+    /** "rent 15000" and "demo rent 15000" when no due day was said. */
+    private fun bareBill(text: String): BooksAction.Bill? {
+        val match = Regex("""^(?:(?<demo>demo)\s+)?$BILL_KIND(?:\s+(?<bill>bill))?\s+$AMOUNT$""").matchEntire(text)
             ?: return null
-        val amount = amount(named) ?: return null
-        val due = dueDay(named, now) ?: return null
-        return BooksAction.Bill(BillKind.OTHER, titleParty(named.groups["label"]?.value.orEmpty()), amount, due)
+        val token = match.groups["kind"]?.value.orEmpty()
+        val needsBillWord = token in setOf("electric", "power", "current", "bescom")
+        if (needsBillWord && match.groups["bill"] == null) return null
+        val rupees = amount(match) ?: return null
+        val kind = billKind(token)
+        val label = if (match.groups["demo"] != null) "demo ${kind.label}" else kind.label
+        return BooksAction.Bill(kind, titleParty(label), rupees, dueEpochMs = null)
     }
 
     private fun order(text: String): BooksAction? {
@@ -223,6 +238,16 @@ object BooksUtterance {
     }
 
     private fun debt(text: String, now: ZonedDateTime): BooksAction? {
+        val loan = Regex(
+            """^(?:a\s+)?(?:(?<demo>demo)\s+)?bank\s+loan\s+$AMOUNT(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$""",
+        ).matchEntire(text) ?: Regex(
+            """^(?:i\s+)?(?:received|got)\s+$AMOUNT\s+(?:as\s+)?(?:a\s+)?(?:(?<demo>demo)\s+)?bank\s+loan(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$""",
+        ).matchEntire(text)
+        if (loan != null) {
+            val amount = amount(loan) ?: return null
+            val lender = if (loan.groups["demo"] != null) "demo bank" else "bank"
+            return BooksAction.OwnerDebt(titleParty(lender), amount, dueDayOrNull(loan, now))
+        }
         val explicit = listOf(
             Regex("""^(?:my\s+)?owner\s+debt\s+(?:to\s+)?(?<party>.+?)\s+(?:is\s+)?$AMOUNT(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
             Regex("""^my\s+debt\s+(?:to\s+)?(?<party>.+?)\s+(?:is\s+)?$AMOUNT(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
@@ -255,6 +280,12 @@ object BooksUtterance {
     }
 
     private fun money(text: String): BooksAction? {
+        Regex("""^(?:a\s+)?(?:(?<demo>demo)\s+)?personal\s+(?<party>.+?)\s+$AMOUNT$""").matchEntire(text)?.let { match ->
+            val rupees = amount(match) ?: return null
+            val party = match.groups["party"]?.value.orEmpty()
+            val named = if (match.groups["demo"] != null && !party.startsWith("demo")) "demo $party" else party
+            return BooksAction.Money(MoneyDirection.OUT, MoneyScope.PERSONAL, rupees, titleParty(named))
+        }
         Regex("""^(?<scope>personal|business)\s+expense\s+$AMOUNT(?:\s+(?:for|on)\s+(?<party>.+))?$""")
             .matchEntire(text)
             ?.let { match ->
@@ -269,6 +300,12 @@ object BooksUtterance {
         Regex("""^money\s+in\s+$AMOUNT(?:\s+from\s+(?:the\s+)?(?<party>.+))?$""").matchEntire(text)?.let { match ->
             val amount = amount(match) ?: return null
             return BooksAction.Money(MoneyDirection.IN, MoneyScope.BUSINESS, amount, titleParty(match.groups["party"]?.value.orEmpty()))
+        }
+        Regex("""^(?:i\s+)?paid\s+$AMOUNT\s+(?:for|on)\s+(?<party>.+)$""").matchEntire(text)?.let { match ->
+            val rupees = amount(match) ?: return null
+            val party = match.groups["party"]?.value.orEmpty()
+            val scope = if (Regex("""\bpersonal\b""").containsMatchIn(party)) MoneyScope.PERSONAL else MoneyScope.BUSINESS
+            return BooksAction.Money(MoneyDirection.OUT, scope, rupees, titleParty(party))
         }
         Regex("""^(?:i\s+)?paid\s+$AMOUNT\s+to\s+(?:the\s+)?(?<party>.+)$""").matchEntire(text)?.let { match ->
             val amount = amount(match) ?: return null

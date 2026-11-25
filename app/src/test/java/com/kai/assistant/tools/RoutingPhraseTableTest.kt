@@ -145,6 +145,12 @@ class RoutingPhraseTableTest {
         "sold a sofa for 45000 advance 10000" to LocalCommand.Books::class,
         "how are the books" to LocalCommand.Books::class,
         "open business books" to LocalCommand.Books::class,
+        "rent 15000" to LocalCommand.Books::class,
+        "personal lunch 400" to LocalCommand.Books::class,
+        "a personal lunch 400" to LocalCommand.Books::class,
+        "bank loan 50000" to LocalCommand.Books::class,
+        "a bank loan 50000" to LocalCommand.Books::class,
+        "I paid 15000 for rent" to LocalCommand.Books::class,
     )
 
     private val toChat = listOf(

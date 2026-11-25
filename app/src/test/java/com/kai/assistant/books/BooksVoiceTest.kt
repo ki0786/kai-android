@@ -60,7 +60,7 @@ class BooksVoiceTest {
         val action = books("electricity bill 2400 due on the 5th") as BooksAction.Bill
         assertEquals(BillKind.ELECTRICITY, action.kind)
         assertEquals(2_400, action.amount)
-        val due = java.time.Instant.ofEpochMilli(action.dueEpochMs).atZone(zone)
+        val due = java.time.Instant.ofEpochMilli(action.dueEpochMs!!).atZone(zone)
         assertEquals(5, due.dayOfMonth)
         assertEquals(12, due.monthValue)
         assertEquals(2026, due.year)
@@ -87,6 +87,34 @@ class BooksVoiceTest {
         assertEquals(SummaryFocus.ALL, summary.focus)
         assertTrue(books("what do i owe") is BooksAction.Summary)
         assertTrue(books("who owes me") is BooksAction.Summary)
+        val lunch = books("personal lunch 400") as BooksAction.Money
+        assertEquals(MoneyScope.PERSONAL, lunch.scope)
+        assertEquals(MoneyDirection.OUT, lunch.direction)
+        assertEquals(400, lunch.amount)
+        assertEquals("Lunch", lunch.party)
+        val lunchNamed = books("a personal lunch 400") as BooksAction.Money
+        assertEquals("Lunch", lunchNamed.party)
+        val demoLunch = books("demo personal lunch 400") as BooksAction.Money
+        assertEquals("Demo Lunch", demoLunch.party)
+        val rent = books("rent 15000") as BooksAction.Bill
+        assertEquals(BillKind.RENT, rent.kind)
+        assertEquals(15_000, rent.amount)
+        assertNull(rent.dueEpochMs)
+        assertEquals("Rent", rent.label)
+        val demoRent = books("demo rent 15000") as BooksAction.Bill
+        assertEquals("Demo Rent", demoRent.label)
+        assertNull(demoRent.dueEpochMs)
+        val loan = books("bank loan 50000") as BooksAction.OwnerDebt
+        assertEquals("Bank", loan.lender)
+        assertEquals(50_000, loan.amount)
+        assertNull(loan.dueEpochMs)
+        val demoLoan = books("a demo bank loan 50000") as BooksAction.OwnerDebt
+        assertEquals("Demo Bank", demoLoan.lender)
+        val paidRent = books("I paid 15000 for rent") as BooksAction.Money
+        assertEquals(MoneyDirection.OUT, paidRent.direction)
+        assertEquals(MoneyScope.BUSINESS, paidRent.scope)
+        assertEquals(15_000, paidRent.amount)
+        assertEquals("Rent", paidRent.party)
         val debt = books("I owe the bank 200000") as BooksAction.OwnerDebt
         assertEquals("Bank", debt.lender)
         val vendor = books("I owe the wood supplier 15000 due on the 10th") as BooksAction.VendorDue

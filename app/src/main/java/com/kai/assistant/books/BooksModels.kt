@@ -85,7 +85,7 @@ data class Bill(
     val kind: BillKind,
     val label: String,
     val amount: Long,
-    val dueEpochMs: Long,
+    val dueEpochMs: Long?,
     val paid: Boolean,
 )
 
@@ -164,7 +164,7 @@ sealed class BooksAction {
         val kind: BillKind,
         val label: String,
         val amount: Long,
-        val dueEpochMs: Long,
+        val dueEpochMs: Long?,
     ) : BooksAction()
 
     data class MarkBillPaid(

@@ -156,6 +156,32 @@ class BooksLedgerTest {
     }
 
     @Test
+    fun rentLunchAndLoanStayInTheBooks() {
+        var books = apply("demo rent 15000").snapshot
+        val rent = books.bills.single()
+        assertEquals(BillKind.RENT, rent.kind)
+        assertEquals("Demo Rent", rent.label)
+        assertEquals(15_000, rent.amount)
+        assertNull(rent.dueEpochMs)
+        assertEquals(DueState.UPCOMING, dueState(rent.dueEpochMs, rent.paid, nowMs, zone))
+        books = engine.apply(books, BooksUtterance.parse("personal demo lunch 400", now)!!, nowMs).snapshot
+        val lunch = books.money.single()
+        assertEquals(MoneyDirection.OUT, lunch.direction)
+        assertEquals(MoneyScope.PERSONAL, lunch.scope)
+        assertEquals(400, lunch.amount)
+        assertEquals("Demo Lunch", lunch.party)
+        books = engine.apply(books, BooksUtterance.parse("demo bank loan 50000", now)!!, nowMs).snapshot
+        assertEquals("Demo Bank", books.debts.single().lender)
+        assertEquals(50_000, books.debts.single().balance)
+        assertEquals(65_000, ownerOwes(books))
+        assertEquals(400, periodTotals(books.money, nowMs, zone).month.moneyOut)
+        assertEquals(400, periodTotals(books.money, nowMs, zone).monthPersonal.moneyOut)
+        val restored = booksSnapshotFromJson(books.toJson().toString())
+        assertNull(restored.bills.single().dueEpochMs)
+        assertEquals(books, restored)
+    }
+
+    @Test
     fun advanceCannotExceedThePrice() {
         val rejected = engine.apply(
             BooksSnapshot(),
