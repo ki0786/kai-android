@@ -89,6 +89,25 @@ data class Bill(
     val paid: Boolean,
 )
 
+/** A material order KAI sent to a supplier the owner already tagged. No price is stored. */
+data class PurchaseOrderRecord(
+    val id: String,
+    val supplier: String,
+    val requestedBy: String,
+    val lines: String,
+    val atEpochMs: Long,
+)
+
+/** A supplier's total, the advance already in the books, and what is still unpaid. */
+data class SupplierBillRecord(
+    val id: String,
+    val supplier: String,
+    val billAmount: Long,
+    val advance: Long,
+    val payable: Long,
+    val atEpochMs: Long,
+)
+
 data class BooksSnapshot(
     val money: List<MoneyEntry> = emptyList(),
     val orders: List<FurnitureOrder> = emptyList(),
@@ -98,6 +117,8 @@ data class BooksSnapshot(
     val receivables: List<Receivable> = emptyList(),
     val debts: List<OwnerDebt> = emptyList(),
     val bills: List<Bill> = emptyList(),
+    val purchaseOrders: List<PurchaseOrderRecord> = emptyList(),
+    val supplierBills: List<SupplierBillRecord> = emptyList(),
 )
 
 enum class SummaryFocus { ALL, OWED_TO_ME, I_OWE, SALES, CASH_TODAY, CASH_WEEK, CASH_MONTH }
@@ -119,6 +140,8 @@ sealed class BooksAction {
         val scope: MoneyScope,
         val amount: Long,
         val party: String,
+        /** When this contains "advance", the payment is a supplier advance, not a bill settlement. */
+        val note: String = "",
     ) : BooksAction()
 
     data class Order(
@@ -179,4 +202,17 @@ sealed class BooksAction {
     data class SetOrderStatus(val id: String, val status: OrderStatus) : BooksAction()
 
     data class Summary(val focus: SummaryFocus) : BooksAction()
+
+    /** Workshop order. The lines are quantities only — this action has no price. */
+    data class PurchaseOrder(
+        val supplier: String,
+        val requestedBy: String,
+        val lines: String,
+    ) : BooksAction()
+
+    /** Supplier's stated total. The payable amount is computed from advances already in the books. */
+    data class SupplierBill(
+        val supplier: String,
+        val billAmount: Long,
+    ) : BooksAction()
 }

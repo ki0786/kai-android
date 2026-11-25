@@ -13,12 +13,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -26,18 +28,25 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kai.assistant.books.normalizeParty
+import com.kai.assistant.books.titleParty
 import com.kai.assistant.business.AutoReplySettings
 import com.kai.assistant.business.BusinessInfoStore
 import com.kai.assistant.business.Enquiry
 import com.kai.assistant.business.EnquiryStatus
 import com.kai.assistant.business.EnquiryStore
 import com.kai.assistant.business.FollowUpScheduler
+import com.kai.assistant.business.PartyRole
+import com.kai.assistant.business.PartyTag
+import com.kai.assistant.business.PartyTagStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,9 +56,11 @@ fun EnquiryInboxScreen(
 ) {
     val context = LocalContext.current
     val store = remember { EnquiryStore.get(context) }
+    val tags = remember { PartyTagStore.get(context) }
     val infoStore = remember { BusinessInfoStore.get(context) }
     val autoReply = remember { AutoReplySettings.get(context) }
     val enquiries by store.enquiries.collectAsStateWithLifecycle()
+    val partyTags by tags.tags.collectAsStateWithLifecycle()
     val info by infoStore.info.collectAsStateWithLifecycle()
     val enabled by autoReply.enabled.collectAsStateWithLifecycle()
     val accessGranted = AutoReplySettings.notificationAccessGranted(context)
@@ -95,8 +106,8 @@ fun EnquiryInboxScreen(
                         text = when {
                             !info.readyForAutoReply -> "Add showroom address and hours in Business info first."
                             !accessGranted -> "Turn on notification access for KAI, then flip this switch."
-                            enabled -> "On — KAI answers common questions from Business info."
-                            else -> "Off by default. Only WhatsApp Business is read."
+                            enabled -> "On — KAI answers customers. Labour and Supplier chats are handled separately."
+                            else -> "Off by default. Tag a chat as Labour or Supplier and KAI still reads that chat."
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -127,6 +138,12 @@ fun EnquiryInboxScreen(
                 ) { Text("Open notification access") }
             }
             TextButton(onClick = onOpenBusinessInfo) { Text("Edit business info") }
+            Text(
+                text = "Tag labour and suppliers by the name WhatsApp Business shows. KAI reads only those chats. Personal WhatsApp, groups, and untagged chats are left alone.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TagByName(tags, partyTags)
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider()
             if (sorted.isEmpty()) {
@@ -139,12 +156,27 @@ fun EnquiryInboxScreen(
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f),
                 ) {
                     items(sorted, key = { it.chatKey }) { enquiry ->
+                        val role = partyTags.firstOrNull { tag ->
+                            tag.chatKey == enquiry.chatKey ||
+                                normalizeParty(tag.displayName) == normalizeParty(enquiry.customerName)
+                        }?.role
                         EnquiryRow(
                             enquiry = enquiry,
                             nowMs = now,
+                            role = role,
+                            onTag = { selected ->
+                                val matched = partyTags.filter { tag ->
+                                    tag.chatKey == enquiry.chatKey ||
+                                        normalizeParty(tag.displayName) == normalizeParty(enquiry.customerName)
+                                }
+                                matched.forEach { tags.remove(it.chatKey) }
+                                if (selected != null) {
+                                    tags.tag(enquiry.chatKey, enquiry.customerName, selected)
+                                }
+                            },
                             onResumeKai = {
                                 store.update(enquiry.chatKey) {
                                     it.copy(ownerHandling = false, needsOwner = false, needsOwnerReason = "")
@@ -165,9 +197,53 @@ fun EnquiryInboxScreen(
 }
 
 @Composable
+private fun TagByName(
+    tags: PartyTagStore,
+    partyTags: List<PartyTag>,
+) {
+    var name by remember { mutableStateOf("") }
+    OutlinedTextField(
+        value = name,
+        onValueChange = { name = it },
+        label = { Text("Name in WhatsApp Business") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = {
+                val display = titleParty(name)
+                if (display.isBlank()) return@Button
+                tags.tag("name:${normalizeParty(display)}", display, PartyRole.LABOUR)
+                name = ""
+            },
+        ) { Text("Tag labour") }
+        Button(
+            onClick = {
+                val display = titleParty(name)
+                if (display.isBlank()) return@Button
+                tags.tag("name:${normalizeParty(display)}", display, PartyRole.SUPPLIER)
+                name = ""
+            },
+        ) { Text("Tag supplier") }
+    }
+    partyTags.forEach { tag ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${tag.displayName} · ${if (tag.role == PartyRole.LABOUR) "Labour" else "Supplier"}")
+            TextButton(onClick = { tags.remove(tag.chatKey) }) { Text("Remove") }
+        }
+    }
+}
+
+@Composable
 private fun EnquiryRow(
     enquiry: Enquiry,
     nowMs: Long,
+    role: PartyRole?,
+    onTag: (PartyRole?) -> Unit,
     onResumeKai: () -> Unit,
     onMarkDone: () -> Unit,
 ) {
@@ -209,7 +285,24 @@ private fun EnquiryRow(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (enquiry.ownerHandling) {
+            FilterChip(
+                selected = role == null,
+                onClick = { onTag(null) },
+                label = { Text("Customer") },
+            )
+            FilterChip(
+                selected = role == PartyRole.LABOUR,
+                onClick = { onTag(PartyRole.LABOUR) },
+                label = { Text("Labour") },
+            )
+            FilterChip(
+                selected = role == PartyRole.SUPPLIER,
+                onClick = { onTag(PartyRole.SUPPLIER) },
+                label = { Text("Supplier") },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (enquiry.ownerHandling && role == null) {
                 TextButton(onClick = onResumeKai) { Text("Let KAI reply again") }
             }
             if (!enquiry.done) {

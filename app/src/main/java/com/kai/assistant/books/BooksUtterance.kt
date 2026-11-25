@@ -280,6 +280,20 @@ object BooksUtterance {
     }
 
     private fun money(text: String): BooksAction? {
+        Regex("""^(?:i\s+)?(?:paid\s+)?(?:an\s+)?advance(?:\s+of)?\s+$AMOUNT\s+to\s+(?:the\s+)?(?<party>.+)$""")
+            .matchEntire(text)
+            ?.let { match ->
+                val amount = amount(match) ?: return null
+                val party = titleParty(match.groups["party"]?.value.orEmpty())
+                if (party.isBlank()) return null
+                return BooksAction.Money(
+                    direction = MoneyDirection.OUT,
+                    scope = MoneyScope.BUSINESS,
+                    amount = amount,
+                    party = party,
+                    note = "Advance to $party",
+                )
+            }
         Regex("""^(?:a\s+)?(?:(?<demo>demo)\s+)?personal\s+(?<party>.+?)\s+$AMOUNT$""").matchEntire(text)?.let { match ->
             val rupees = amount(match) ?: return null
             val party = match.groups["party"]?.value.orEmpty()

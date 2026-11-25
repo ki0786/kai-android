@@ -80,12 +80,15 @@ object ChatFilter {
      * @param lastSeenAtMs newest customer line already handled in this chat, or the
      *   time auto-reply was switched on if that is later: older lines are not KAI's to answer
      * @param recentKaiReplies what KAI itself sent in this chat a short while ago
+     * @param requireReplyAction enquiry replies need a free-text RemoteInput on this
+     *   notification. The workshop manager does not: it opens the tagged supplier chat.
      */
     fun evaluate(
         facts: NotificationFacts,
         lastSeenAtMs: Long = 0L,
         lastSeenText: String? = null,
         recentKaiReplies: List<String> = emptyList(),
+        requireReplyAction: Boolean = true,
     ): FilterDecision {
         if (facts.packageName != WHATSAPP_BUSINESS_PACKAGE) return ignore(IgnoreReason.OtherApp)
         if (facts.isGroupSummary) return ignore(IgnoreReason.Summary)
@@ -95,7 +98,7 @@ object ChatFilter {
         val title = customerName(facts)
         if (isStatusOrBroadcast(facts, title)) return ignore(IgnoreReason.StatusOrBroadcast)
         if (isGroup(facts, title)) return ignore(IgnoreReason.Group)
-        if (!facts.hasReplyAction) return ignore(IgnoreReason.NoReplyAction)
+        if (requireReplyAction && !facts.hasReplyAction) return ignore(IgnoreReason.NoReplyAction)
         if (title.isEmpty()) return ignore(IgnoreReason.Empty)
 
         val lines = facts.messages.filter { it.text.isNotBlank() }

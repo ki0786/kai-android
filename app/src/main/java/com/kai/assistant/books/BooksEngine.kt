@@ -33,31 +33,38 @@ class BooksEngine(
         is BooksAction.SettleReceivable -> settleReceivable(snapshot, action, nowMs)
         is BooksAction.SetOrderStatus -> setOrderStatus(snapshot, action, nowMs)
         is BooksAction.Summary -> BooksOutcome(snapshot, speakBooks(snapshot, nowMs, zone, action.focus))
+        is BooksAction.PurchaseOrder -> recordPurchaseOrder(snapshot, action, nowMs)
+        is BooksAction.SupplierBill -> recordSupplierBill(snapshot, action, nowMs)
     }
 
     private fun recordMoney(snapshot: BooksSnapshot, action: BooksAction.Money, nowMs: Long): BooksOutcome {
         if (action.amount <= 0) return BooksOutcome(snapshot, "I need an amount greater than zero.")
         val party = titleParty(action.party).ifBlank { if (action.direction == MoneyDirection.IN) "Cash in" else "Cash out" }
+        val note = action.note.ifBlank { party }
         val entry = MoneyEntry(
             id = ids(),
             direction = action.direction,
             scope = action.scope,
             amount = action.amount,
             party = party,
-            note = party,
+            note = note,
             atEpochMs = nowMs,
         )
         var next = snapshot.copy(money = snapshot.money + entry)
-        val settlement = when (action.direction) {
-            MoneyDirection.OUT -> settleOutgoing(next, party, action.amount)
-            MoneyDirection.IN -> settleIncoming(next, party, action.amount)
+        val isAdvance = note.contains("advance", ignoreCase = true)
+        val settlement = when {
+            isAdvance -> Settlement(next, "")
+            action.direction == MoneyDirection.OUT -> settleOutgoing(next, party, action.amount)
+            else -> settleIncoming(next, party, action.amount)
         }
         next = settlement.snapshot
         val scopeWord = if (action.scope == MoneyScope.PERSONAL) "personal" else "business"
         val verb = if (action.direction == MoneyDirection.IN) "Money in" else "Paid"
         val spoken = buildString {
             append("Saved on this phone. ")
-            if (action.direction == MoneyDirection.IN) {
+            if (note.contains("advance", ignoreCase = true) && action.direction == MoneyDirection.OUT) {
+                append("Advance ${formatRupees(action.amount)} to $party. ")
+            } else if (action.direction == MoneyDirection.IN) {
                 append("$verb ${formatRupees(action.amount)} from $party. ")
             } else {
                 append("$verb ${formatRupees(action.amount)} to $party. ")
@@ -298,6 +305,64 @@ class BooksEngine(
             "Saved on this phone. ${order.item} is now ${action.status.label}."
         }
         return BooksOutcome(snapshot.copy(orders = orders, money = money), spoken)
+    }
+
+    private fun recordPurchaseOrder(snapshot: BooksSnapshot, action: BooksAction.PurchaseOrder, nowMs: Long): BooksOutcome {
+        val supplier = titleParty(action.supplier).ifBlank {
+            return BooksOutcome(snapshot, "I need the supplier. Nothing was saved.")
+        }
+        val lines = action.lines.trim()
+        if (lines.isEmpty()) return BooksOutcome(snapshot, "I need the materials. Nothing was saved.")
+        val order = PurchaseOrderRecord(
+            id = ids(),
+            supplier = supplier,
+            requestedBy = titleParty(action.requestedBy).ifBlank { "Labour" },
+            lines = lines,
+            atEpochMs = nowMs,
+        )
+        val spoken = "Saved on this phone. Order for $supplier: $lines. No price was added."
+        return BooksOutcome(snapshot.copy(purchaseOrders = snapshot.purchaseOrders + order), spoken)
+    }
+
+    private fun recordSupplierBill(snapshot: BooksSnapshot, action: BooksAction.SupplierBill, nowMs: Long): BooksOutcome {
+        if (action.billAmount <= 0) return BooksOutcome(snapshot, "I need the bill amount. Nothing was saved.")
+        val supplier = titleParty(action.supplier).ifBlank {
+            return BooksOutcome(snapshot, "I need the supplier. Nothing was saved.")
+        }
+        val advance = recordedAdvanceRupees(snapshot, supplier)
+        val applied = minOf(advance, action.billAmount)
+        val payable = payableRupees(action.billAmount, applied)
+        val bill = SupplierBillRecord(
+            id = ids(),
+            supplier = supplier,
+            billAmount = action.billAmount,
+            advance = applied,
+            payable = payable,
+            atEpochMs = nowMs,
+        )
+        val dues = if (payable > 0) {
+            snapshot.vendorDues + VendorDue(
+                id = ids(),
+                vendor = supplier,
+                amount = payable,
+                dueEpochMs = null,
+                paid = false,
+            )
+        } else {
+            snapshot.vendorDues
+        }
+        val advanceLine = if (applied > 0) {
+            "Advance already recorded ${formatRupees(applied)}. "
+        } else {
+            "No advance is recorded for $supplier. "
+        }
+        val spoken = "Saved on this phone. Bill from $supplier is ${formatRupees(action.billAmount)}. " +
+            advanceLine +
+            "Pay ${formatRupees(payable)}. I did not pay, and I did not send UPI or a payment."
+        return BooksOutcome(
+            snapshot.copy(supplierBills = snapshot.supplierBills + bill, vendorDues = dues),
+            spoken,
+        )
     }
 
     private data class Settlement(val snapshot: BooksSnapshot, val note: String)

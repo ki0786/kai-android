@@ -13,6 +13,8 @@ fun BooksSnapshot.toJson(): JSONObject = JSONObject()
     .put("receivables", receivables.toJson { it.toJson() })
     .put("debts", debts.toJson { it.toJson() })
     .put("bills", bills.toJson { it.toJson() })
+    .put("purchaseOrders", purchaseOrders.toJson { it.toJson() })
+    .put("supplierBills", supplierBills.toJson { it.toJson() })
 
 fun booksSnapshotFromJson(raw: String): BooksSnapshot {
     val json = JSONObject(raw)
@@ -25,6 +27,8 @@ fun booksSnapshotFromJson(raw: String): BooksSnapshot {
         receivables = json.optJSONArray("receivables").toList { receivableFromJson(it) },
         debts = json.optJSONArray("debts").toList { debtFromJson(it) },
         bills = json.optJSONArray("bills").toList { billFromJson(it) },
+        purchaseOrders = json.optJSONArray("purchaseOrders").toList { purchaseOrderFromJson(it) },
+        supplierBills = json.optJSONArray("supplierBills").toList { supplierBillFromJson(it) },
     )
 }
 
@@ -149,6 +153,46 @@ private fun Bill.toJson(): JSONObject = JSONObject()
     .put("amount", amount)
     .put("due", dueEpochMs ?: JSONObject.NULL)
     .put("paid", paid)
+
+private fun PurchaseOrderRecord.toJson(): JSONObject = JSONObject()
+    .put("id", id)
+    .put("supplier", supplier)
+    .put("requestedBy", requestedBy)
+    .put("lines", lines)
+    .put("at", atEpochMs)
+
+private fun purchaseOrderFromJson(json: JSONObject): PurchaseOrderRecord? {
+    val id = json.optString("id")
+    if (id.isBlank()) return null
+    return PurchaseOrderRecord(
+        id = id,
+        supplier = json.optString("supplier"),
+        requestedBy = json.optString("requestedBy"),
+        lines = json.optString("lines"),
+        atEpochMs = json.optLong("at"),
+    )
+}
+
+private fun SupplierBillRecord.toJson(): JSONObject = JSONObject()
+    .put("id", id)
+    .put("supplier", supplier)
+    .put("bill", billAmount)
+    .put("advance", advance)
+    .put("payable", payable)
+    .put("at", atEpochMs)
+
+private fun supplierBillFromJson(json: JSONObject): SupplierBillRecord? {
+    val id = json.optString("id")
+    if (id.isBlank()) return null
+    return SupplierBillRecord(
+        id = id,
+        supplier = json.optString("supplier"),
+        billAmount = json.optLong("bill"),
+        advance = json.optLong("advance"),
+        payable = json.optLong("payable"),
+        atEpochMs = json.optLong("at"),
+    )
+}
 
 private fun billFromJson(json: JSONObject): Bill? {
     val id = json.optString("id")
