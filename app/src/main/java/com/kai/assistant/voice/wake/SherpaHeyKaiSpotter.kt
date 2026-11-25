@@ -52,7 +52,10 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
                     provider = "cpu",
                     modelType = "zipformer2",
                 ),
-                maxActivePaths = 8,
+                // A beam of 8 dropped the keyword tokens on the quieter frames
+                // before the threshold was checked. 16 keeps ▁HE Y ▁K E alive
+                // long enough for that check.
+                maxActivePaths = 16,
                 keywordsFile = keywords.path,
                 keywordsScore = KEYWORD_BOOST,
                 keywordsThreshold = keywordsThreshold(this.sensitivity),
@@ -76,7 +79,8 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
             applyPendingLocked()
             val active = stream ?: return false
             val engine = spotter ?: return false
-            active.acceptWaveform(samples, SAMPLE_RATE)
+            val rms = pcmRms(samples)
+            active.acceptWaveform(amplifyKeywordAudio(samples), SAMPLE_RATE)
             var hit = false
             while (engine.isReady(active)) {
                 engine.decode(active)
@@ -102,7 +106,7 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
             if (hit) return true
             val threshold = keywordsThreshold(sensitivity)
             val now = System.currentTimeMillis()
-            val miss = keywordMissLog(now, lastMissLogMs, pcmRms(samples), threshold)
+            val miss = keywordMissLog(now, lastMissLogMs, rms, threshold)
             if (miss != null) {
                 lastMissLogMs = now
                 Log.i(TAG, miss)

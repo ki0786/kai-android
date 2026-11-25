@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.business.EnquiryStatusNotifier
+import com.kai.assistant.tools.ForegroundActivity
 import com.kai.assistant.ui.KaiApp
 import com.kai.assistant.ui.theme.KaiTheme
 import com.kai.assistant.voice.wake.WakeNotifications
@@ -45,6 +46,16 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // The activity is in the foreground here, including after a reboot when the user opens KAI.
         WakeWordController.startIfEnabled(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ForegroundActivity.resumed(this)
+    }
+
+    override fun onStop() {
+        ForegroundActivity.paused(this)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {

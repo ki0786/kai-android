@@ -128,21 +128,22 @@ class WakePolicyTest {
 
     @Test
     fun sensitivityMapsOntoTheTriggerThreshold() {
-        assertEquals(0.15f, keywordsThreshold(0f), 0.001f)
-        assertEquals(0.10f, keywordsThreshold(0.5f), 0.001f)
-        assertEquals(0.05f, keywordsThreshold(1f), 0.001f)
-        assertEquals(0.15f, keywordsThreshold(-2f), 0.001f)
-        assertEquals(0.05f, keywordsThreshold(4f), 0.001f)
+        assertEquals(0.03f, keywordsThreshold(0f), 0.001f)
+        assertEquals(0.02f, keywordsThreshold(0.5f), 0.001f)
+        assertEquals(0.01f, keywordsThreshold(1f), 0.001f)
+        assertEquals(0.03f, keywordsThreshold(-2f), 0.001f)
+        assertEquals(0.01f, keywordsThreshold(4f), 0.001f)
     }
 
     @Test
     fun keywordLineIsTheHeyKaiTokens() {
         val line = heyKaiKeywordLine(0.5f)
-        assertTrue(line.startsWith("$HEY_KAI_TOKENS :3.00 #0.10 @HEYKAI"))
-        assertTrue(line.contains("▁HE Y K A I :3.00 #0.10 @HEYKAI"))
-        assertTrue(line.contains("▁HI ▁K A I :3.00 #0.10 @HEYKAI"))
-        assertTrue(line.contains("▁HE Y ▁CA I :3.00 #0.10 @HEYKAI"))
-        assertTrue(line.contains("▁HA I ▁K A I :3.00 #0.10 @HEYKAI"))
+        assertTrue(line.startsWith("$HEY_KAI_TOKENS :3.00 #0.02 @HEYKAI"))
+        assertTrue(line.contains("▁HE Y K A I :3.00 #0.02 @HEYKAI"))
+        assertTrue(line.contains("▁HI ▁K A I :3.00 #0.02 @HEYKAI"))
+        assertTrue(line.contains("▁HE Y ▁K E :3.00 #0.02 @HEYKAI"))
+        assertTrue(line.contains("▁HE Y ▁CA I :3.00 #0.02 @HEYKAI"))
+        assertTrue(line.contains("▁HA I ▁K A I :3.00 #0.02 @HEYKAI"))
         assertTrue(line.endsWith("@HEYKAI"))
         assertEquals(HEY_KAI_SPELLINGS.size, line.lines().size)
         assertFalse(line.contains(","))
@@ -168,6 +169,20 @@ class WakePolicyTest {
         assertTrue(pcmRms(quiet) < KEYWORD_MISS_RMS)
         val speech = FloatArray(1600) { 0.05f }
         assertTrue(pcmRms(speech) >= KEYWORD_MISS_RMS)
+    }
+
+    @Test
+    fun quietHeyKaiIsLiftedBeforeTheSpotter() {
+        assertEquals(1f, keywordMakeupGain(0.010f), 0.001f)
+        assertEquals(KEYWORD_MAX_GAIN, keywordMakeupGain(0.015f), 0.01f)
+        assertEquals(KEYWORD_SPEECH_RMS / 0.044f, keywordMakeupGain(0.044f), 0.01f)
+        assertEquals(1f, keywordMakeupGain(0.080f), 0.001f)
+        val quiet = FloatArray(1600) { 0.02f }
+        val lifted = amplifyKeywordAudio(quiet)
+        assertTrue(pcmRms(lifted) > pcmRms(quiet))
+        assertEquals(KEYWORD_SPEECH_RMS, pcmRms(lifted), 0.005f)
+        val loud = FloatArray(32) { 0.1f }
+        assertTrue(amplifyKeywordAudio(loud) === loud)
     }
 
     @Test

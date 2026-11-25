@@ -103,6 +103,16 @@ internal const val KEYWORD_MISS_LOG_MS = 2_000L
  */
 internal const val KEYWORD_MISS_RMS = 0.015f
 
+/**
+ * Level a quiet "hey kai" is lifted to before the spotter sees it.
+ * Tries at rms 0.015–0.044 stayed under the old 0.10 score. The tries that
+ * chimed were louder than that, on the same `▁HE Y ▁K E` tokens.
+ */
+internal const val KEYWORD_SPEECH_RMS = 0.06f
+
+/** Cap so room noise just over [KEYWORD_MISS_RMS] is not turned into a shout. */
+internal const val KEYWORD_MAX_GAIN = 4f
+
 /** Persistent foreground notification while the wake microphone is open. */
 internal const val LISTENING_NOTIFICATION = "KAI is listening for 'Hey KAI'"
 
@@ -210,12 +220,32 @@ internal object WakeModelSpec {
 
 /**
  * Higher sensitivity lowers the sherpa trigger threshold (easier to fire).
- * 0 → 0.15, 0.5 → 0.10, 1 → 0.05. The old default (0.25) caught studio TTS
- * and missed a live voice.
+ * 0 → 0.03, 0.5 → 0.02, 1 → 0.01.
+ * Sherpa emits a keyword only when the average token probability is at least
+ * this value. 0.10 never returned a result for the quieter live tries
+ * (rms 0.015–0.044), so those tries could not chime. 0.02 is under that bound.
  */
 internal fun keywordsThreshold(sensitivity: Float): Float {
     val clamped = sensitivity.coerceIn(0f, 1f)
-    return 0.15f - clamped * 0.10f
+    return 0.03f - clamped * 0.02f
+}
+
+/**
+ * Gain for a chunk that is speech but quieter than the tries that already hit.
+ * Noise under [KEYWORD_MISS_RMS] and audio that is already loud stay at 1.
+ */
+internal fun keywordMakeupGain(rms: Float): Float {
+    if (rms < KEYWORD_MISS_RMS || rms >= KEYWORD_SPEECH_RMS) return 1f
+    return (KEYWORD_SPEECH_RMS / rms).coerceAtMost(KEYWORD_MAX_GAIN)
+}
+
+/** Copy [samples] with [keywordMakeupGain] applied. Returns [samples] when the gain is 1. */
+internal fun amplifyKeywordAudio(samples: FloatArray): FloatArray {
+    val gain = keywordMakeupGain(pcmRms(samples))
+    if (gain == 1f) return samples
+    return FloatArray(samples.size) { index ->
+        (samples[index] * gain).coerceIn(-1f, 1f)
+    }
 }
 
 internal fun heyKaiKeywordLine(sensitivity: Float): String {

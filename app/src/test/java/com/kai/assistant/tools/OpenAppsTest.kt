@@ -29,6 +29,16 @@ class OpenAppsTest {
         assertEquals(LocalCommand.OpenMaps("the supplier"), maps!!.command)
         assertFalse(maps.requiresConfirmation)
         assertNull(researchQuery("open youtube"))
+
+        val okay = router.match("okay open youtube")
+        assertEquals(LocalCommand.LaunchAppByName("youtube"), okay!!.command)
+        assertEquals(
+            LocalCommand.LaunchAppByName("youtube"),
+            router.match("ok, open youtube")!!.command,
+        )
+        assertEquals("YouTube", spokenLaunchName("com.google.android.youtube", "youtube"))
+        assertEquals("YouTube", spokenLaunchName("com.google.android.youtube", ""))
+        assertFalse(spokenLaunchName("com.google.android.youtube", "youtube").contains('.'))
     }
 
     @Test

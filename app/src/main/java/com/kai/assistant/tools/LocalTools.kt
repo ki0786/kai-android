@@ -1,6 +1,7 @@
 package com.kai.assistant.tools
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -17,6 +18,7 @@ import android.provider.Settings
 import android.widget.Toast
 import com.kai.assistant.books.BooksReminders
 import com.kai.assistant.books.BooksStore
+import java.lang.ref.WeakReference
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -379,21 +381,21 @@ class BatteryTool(private val context: Context) {
 }
 
 class LaunchAppTool(private val context: Context) {
-    fun launch(packageName: String): ToolResult {
+    fun launch(packageName: String, requestedName: String = ""): ToolResult {
         val pm = context.packageManager
+        val name = spokenLaunchName(packageName, requestedName)
         val launch = pm.getLaunchIntentForPackage(packageName)
-            ?: return ToolResult.Error("App not installed: $packageName")
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ?: return ToolResult.Error("I couldn't open $name.")
         return runCatching {
-            context.startActivity(launch)
-            ToolResult.Ok("Launching $packageName")
-        }.getOrElse { ToolResult.Error(it.message ?: "Launch failed.") }
+            startInFront(launch)
+            ToolResult.Ok("Opening $name")
+        }.getOrElse { ToolResult.Error("I couldn't open $name.") }
     }
 
     fun launchByLabel(labelQuery: String): ToolResult {
         val packageName = resolveByLabel(labelQuery)
             ?: return ToolResult.Error("I couldn't find an installed app named \"$labelQuery\".")
-        return launch(packageName)
+        return launch(packageName, labelQuery)
     }
 
     fun resolveByLabel(labelQuery: String): String? {
@@ -413,9 +415,9 @@ class LaunchAppTool(private val context: Context) {
         val view = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching {
             if (youtube.resolveActivity(context.packageManager) != null) {
-                context.startActivity(youtube)
+                startInFront(youtube)
             } else {
-                context.startActivity(view)
+                startInFront(view)
             }
             ToolResult.Ok("Searching YouTube for $query.")
         }.getOrElse {
@@ -423,8 +425,46 @@ class LaunchAppTool(private val context: Context) {
         }
     }
 
+    private fun startInFront(intent: Intent) {
+        // startActivity on the application context can return without the system
+        // sending an intent (no wm_new_intent) while this method still said it
+        // launched. The resumed activity is the call that actually sends it.
+        // When an intent is sent, YouTube does come to the front.
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+        )
+        val activity = ForegroundActivity.get()
+            ?: throw IllegalStateException("I couldn't open that app.")
+        activity.startActivity(intent)
+    }
+
     private companion object {
         const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+    }
+}
+
+/**
+ * The activity the user is looking at. Opening another app has to call
+ * [Activity.startActivity] on it. The application context can return without
+ * the system sending a start intent.
+ */
+internal object ForegroundActivity {
+    private var current: WeakReference<Activity>? = null
+
+    fun resumed(activity: Activity) {
+        current = WeakReference(activity)
+    }
+
+    fun paused(activity: Activity) {
+        if (current?.get() === activity) current = null
+    }
+
+    fun get(): Activity? {
+        val activity = current?.get() ?: return null
+        if (activity.isFinishing || activity.isDestroyed) return null
+        return activity
     }
 }
 
