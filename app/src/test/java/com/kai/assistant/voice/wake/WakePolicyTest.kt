@@ -172,7 +172,7 @@ class WakePolicyTest {
 
     @Test
     fun archiveKeepsOnlyTheInt8EnglishModel() {
-        val root = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/"
+        val root = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/"
         assertTrue(shouldKeepArchiveEntry(root + "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"))
         assertTrue(shouldKeepArchiveEntry(root + "tokens.txt"))
         assertFalse(shouldKeepArchiveEntry(root + "encoder-epoch-12-avg-2-chunk-16-left-64.onnx"))
@@ -184,9 +184,24 @@ class WakePolicyTest {
     }
 
     @Test
+    fun chunkSixteenDownsampleIsSixteenFrames() {
+        assertEquals(80, KWS_FEATURE_DIM)
+        assertEquals(45, KWS_ENCODER_FRAMES)
+        assertEquals(16, kwsSubsampledFrames(KWS_ENCODER_FRAMES))
+        assertEquals(KWS_CHUNK_SIZE, kwsSubsampledFrames(KWS_ENCODER_FRAMES))
+        assertEquals(8 * 2, kwsSubsampledFrames(KWS_ENCODER_FRAMES))
+        assertTrue(kwsDownsampleAccepts(kwsSubsampledFrames(KWS_ENCODER_FRAMES)))
+        assertFalse(kwsDownsampleAccepts(17))
+        val encoder = WakeModelSpec.file("encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx")
+        assertEquals(4_807_159L, encoder!!.bytes)
+        assertFalse(WakeModelSpec.ARCHIVE_URL.contains("-mobile"))
+    }
+
+    @Test
     fun modelDownloadIsThePublicReleaseAndNotAnApi() {
         assertTrue(WakeModelSpec.ARCHIVE_URL.startsWith("https://github.com/k2-fsa/sherpa-onnx/"))
         assertTrue(WakeModelSpec.ARCHIVE_URL.contains("gigaspeech"))
+        assertTrue(WakeModelSpec.ARCHIVE_URL.endsWith("sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"))
         assertFalse(WakeModelSpec.ARCHIVE_URL.contains("api_key"))
         assertEquals(4, WakeModelSpec.files.size)
         assertEquals(

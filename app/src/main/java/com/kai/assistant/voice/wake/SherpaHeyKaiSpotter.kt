@@ -28,7 +28,15 @@ internal class SherpaHeyKaiSpotter : HeyKaiSpotter {
             val keywords = File(modelDir, "keywords.txt")
             keywords.writeText(heyKaiKeywordLine(this.sensitivity) + "\n")
             val config = KeywordSpotterConfig(
-                featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
+                // 16 kHz, 80 mel bins, dither off. Sherpa reads T=45 from the
+                // encoder and feeds that many frames. The chunk-16 downsample
+                // then sees kwsSubsampledFrames(45) == 16, which matches
+                // reshape {8, 2, 1, 128}.
+                featConfig = FeatureConfig(
+                    sampleRate = SAMPLE_RATE,
+                    featureDim = KWS_FEATURE_DIM,
+                    dither = 0f,
+                ),
                 modelConfig = OnlineModelConfig(
                     transducer = OnlineTransducerModelConfig(
                         encoder = File(modelDir, "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx").path,

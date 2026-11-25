@@ -62,19 +62,51 @@ internal data class WakeModelFile(
 )
 
 /**
- * Official k2-fsa mobile bundle. Int8 encoder and joiner, fp32 decoder (no int8
- * decoder is published). Hashes are of those four files inside the archive.
+ * Mel bins on the encoder input `[1, T, 80]`.
+ */
+internal const val KWS_FEATURE_DIM = 80
+
+/**
+ * Subsampled frames per call for the `chunk-16` zipformer2 encoder.
+ * The first downsample reshapes them as `{8, 2, 1, 128}`.
+ */
+internal const val KWS_CHUNK_SIZE = 16
+
+/**
+ * Fbank frames the encoder consumes per call (`T` in the model metadata).
+ * `decode_chunk_len` is `chunk_size * 2` (32). Conv2dSubsampling needs 7
+ * frames of context and ConvNeXt keeps 3 frames of right context, so
+ * `T = 32 + 7 + 2 * 3 = 45`.
+ */
+internal const val KWS_ENCODER_FRAMES = 45
+
+/**
+ * Frames left after the streaming embed: `(T - 7) / 2` from Conv2dSubsampling,
+ * minus the 3 right-context frames ConvNeXt holds back. For this model that
+ * is 16. The downsample reshape is `{frames/2, 2, batch, channels}`, so an
+ * odd count (17) aborts the process.
+ */
+internal fun kwsSubsampledFrames(featureFrames: Int): Int = (featureFrames - 7) / 2 - 3
+
+internal fun kwsDownsampleAccepts(frames: Int): Boolean = frames > 0 && frames % 2 == 0
+
+/**
+ * Official k2-fsa GigaSpeech bundle. Int8 encoder and joiner, fp32 decoder.
+ * The `-mobile` encoder fixes the batch at 1 and constant-folds a downsample
+ * pad: it concatenates one extra frame (17) and then reshapes to
+ * `{8, 2, 1, 128}`, which aborts. The non-mobile int8 encoder keeps the
+ * 16-frame chunk. Hashes are of the four files inside the archive.
  */
 internal object WakeModelSpec {
     const val ARCHIVE_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/" +
-            "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile.tar.bz2"
+            "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
 
     val files: List<WakeModelFile> = listOf(
         WakeModelFile(
             name = "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
-            bytes = 4_000_908,
-            sha256 = "7d5a25fbc14b423074fe0c58e1be388ccf3f1a815c649980232a0c47f81875e4",
+            bytes = 4_807_159,
+            sha256 = "1e721676515bcd42a186979733981213c66c80db680e1cc582dfedf3be76e678",
         ),
         WakeModelFile(
             name = "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
