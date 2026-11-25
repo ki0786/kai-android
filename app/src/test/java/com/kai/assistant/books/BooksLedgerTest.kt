@@ -182,6 +182,26 @@ class BooksLedgerTest {
     }
 
     @Test
+    fun labourMaterialRequestIsAWorkshopOrder() {
+        val saved = apply("labour needs 10 sheets of plywood")
+        val order = saved.snapshot.purchaseOrders.single()
+        assertEquals("Not assigned", order.supplier)
+        assertEquals("Labour", order.requestedBy)
+        assertEquals("Plywood 10 sheet", order.lines)
+        assertTrue(saved.spoken.contains("nobody was messaged"))
+        val stocked = BooksSnapshot(
+            materials = listOf(MaterialStock("m1", "Plywood", 2.0, "sheet", "Sharma Timber", 1.0)),
+        )
+        val withSupplier = engine.apply(
+            stocked,
+            BooksUtterance.parse("labor needs 10 sheets of plywood", now)!!,
+            nowMs,
+        )
+        assertEquals("Sharma Timber", withSupplier.snapshot.purchaseOrders.single().supplier)
+        assertTrue(withSupplier.spoken.contains("I did not message anyone"))
+    }
+
+    @Test
     fun advanceCannotExceedThePrice() {
         val rejected = engine.apply(
             BooksSnapshot(),

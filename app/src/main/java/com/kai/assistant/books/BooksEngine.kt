@@ -308,11 +308,11 @@ class BooksEngine(
     }
 
     private fun recordPurchaseOrder(snapshot: BooksSnapshot, action: BooksAction.PurchaseOrder, nowMs: Long): BooksOutcome {
-        val supplier = titleParty(action.supplier).ifBlank {
-            return BooksOutcome(snapshot, "I need the supplier. Nothing was saved.")
-        }
         val lines = action.lines.trim()
         if (lines.isEmpty()) return BooksOutcome(snapshot, "I need the materials. Nothing was saved.")
+        val named = titleParty(action.supplier)
+        val fromStock = if (named.isBlank()) supplierFromStock(snapshot, lines) else ""
+        val supplier = named.ifBlank { fromStock }.ifBlank { "Not assigned" }
         val order = PurchaseOrderRecord(
             id = ids(),
             supplier = supplier,
@@ -320,8 +320,21 @@ class BooksEngine(
             lines = lines,
             atEpochMs = nowMs,
         )
-        val spoken = "Saved on this phone. Order for $supplier: $lines. No price was added."
+        val spoken = when {
+            named.isNotBlank() -> "Saved on this phone. Order for $supplier: $lines. No price was added."
+            fromStock.isNotBlank() ->
+                "Saved on this phone. Order for $supplier: $lines. No price was added. I did not message anyone."
+            else ->
+                "Saved on this phone. Labour asked for $lines. No supplier is saved for that, so nobody was messaged."
+        }
         return BooksOutcome(snapshot.copy(purchaseOrders = snapshot.purchaseOrders + order), spoken)
+    }
+
+    private fun supplierFromStock(snapshot: BooksSnapshot, lines: String): String {
+        val hit = snapshot.materials.firstOrNull { stock ->
+            stock.supplier.isNotBlank() && namesMatch(stock.item, lines)
+        }
+        return titleParty(hit?.supplier.orEmpty())
     }
 
     private fun recordSupplierBill(snapshot: BooksSnapshot, action: BooksAction.SupplierBill, nowMs: Long): BooksOutcome {

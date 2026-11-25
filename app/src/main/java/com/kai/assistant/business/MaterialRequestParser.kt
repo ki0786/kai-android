@@ -84,6 +84,8 @@ object MaterialRequestParser {
         val nameRaw = restoreThickness(protected.removeRange(match.range), thicknesses)
             .replace(Regex("""\s+"""), " ")
             .trim(' ', '-', ':', '/')
+            .replace(Regex("""^(?:of\s+)+""", RegexOption.IGNORE_CASE), "")
+            .trim()
         if (nameRaw.length < 2 || !nameRaw.any { it.isLetter() }) return null
         if (Regex("""\b(?:pay|payment|upi|gpay|phonepe|paytm|rupee|rupees)\b""", RegexOption.IGNORE_CASE).containsMatchIn(nameRaw)) {
             return null

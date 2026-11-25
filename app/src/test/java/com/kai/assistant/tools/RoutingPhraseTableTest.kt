@@ -143,6 +143,8 @@ class RoutingPhraseTableTest {
         "Rahul owes me 12000" to LocalCommand.Books::class,
         "electricity bill 2400 due on the 5th" to LocalCommand.Books::class,
         "sold a sofa for 45000 advance 10000" to LocalCommand.Books::class,
+        "sold a sofa for 25000" to LocalCommand.Books::class,
+        "labour needs 10 sheets of plywood" to LocalCommand.Books::class,
         "how are the books" to LocalCommand.Books::class,
         "open business books" to LocalCommand.Books::class,
         "rent 15000" to LocalCommand.Books::class,

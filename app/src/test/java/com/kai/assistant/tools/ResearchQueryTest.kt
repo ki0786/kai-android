@@ -45,6 +45,11 @@ class ResearchQueryTest {
         assertTrue(memory!!.command is LocalCommand.RecallMemory)
         assertNull(researchQuery("what did I say about the supplier"))
         assertNull(researchQuery("what time is it"))
+        assertNull(researchQuery("sold a sofa for 25000"))
+        assertNull(researchQuery("labour needs 10 sheets of plywood"))
+        assertNull(researchQuery("You recorded selling a sofa for 25,000, and that labor needs 10 sheets of plywood."))
+        assertNotNull(router.match("sold a sofa for 25000"))
+        assertNotNull(router.match("labour needs 10 sheets of plywood"))
     }
 
     @Test
