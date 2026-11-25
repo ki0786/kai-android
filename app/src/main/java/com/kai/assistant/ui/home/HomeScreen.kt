@@ -49,6 +49,7 @@ fun HomeScreen(
     onStartVoice: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenEnquiryInbox: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     Box(
@@ -133,6 +134,16 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp),
             ) {
                 Text(stringResource(R.string.cta_chat))
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenEnquiryInbox,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text(stringResource(R.string.cta_enquiry_inbox))
             }
             Spacer(modifier = Modifier.height(24.dp))
         }

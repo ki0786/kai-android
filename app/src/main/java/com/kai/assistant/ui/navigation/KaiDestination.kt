@@ -5,4 +5,6 @@ sealed class KaiDestination(val route: String) {
     data object Voice : KaiDestination("voice")
     data object Chat : KaiDestination("chat")
     data object Settings : KaiDestination("settings")
+    data object EnquiryInbox : KaiDestination("enquiry_inbox")
+    data object BusinessInfo : KaiDestination("business_info")
 }

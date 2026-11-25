@@ -4,6 +4,8 @@
     <string name="home_tagline">Your voice-first Android assistant</string>
     <string name="cta_voice">Start voice session</string>
     <string name="cta_chat">Open text chat</string>
+    <string name="cta_enquiry_inbox">Enquiry inbox</string>
+    <string name="enquiry_listener_label">KAI WhatsApp Business enquiries</string>
     <string name="mic_idle">Mic off</string>
     <string name="mic_listening">Listening</string>
     <string name="mic_processing">Processing</string>

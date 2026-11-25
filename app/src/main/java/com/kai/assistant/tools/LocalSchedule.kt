@@ -406,6 +406,12 @@ class BootScheduleReceiver : BroadcastReceiver() {
         TimerScheduler(context).restore()
         ReminderScheduler(context).restore()
         LocalClockAlarmScheduler(context).restore()
+        com.kai.assistant.business.FollowUpScheduler.scheduleNext(context)
+        val auto = com.kai.assistant.business.AutoReplySettings.get(context)
+        com.kai.assistant.business.EnquiryStatusNotifier.updateListeningIndicator(
+            context,
+            auto.isEnabled() && com.kai.assistant.business.AutoReplySettings.notificationAccessGranted(context),
+        )
     }
 }
 

@@ -235,6 +235,21 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionTitle("Sagar Furniture enquiries")
+            Text(
+                text = "KAI can answer WhatsApp Business customers from Business info you enter. " +
+                    "Personal WhatsApp is never read. Auto-reply is off until you turn it on in the inbox.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Open Enquiry inbox from the home screen to fill Business info, grant notification " +
+                    "access, and flip the switch.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("Language")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("en" to "English", "hi" to "Hindi", "kn" to "Kannada").forEach { (code, label) ->
