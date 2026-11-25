@@ -30,6 +30,7 @@ class ManagerEngineTest {
         sender: String? = title,
         group: Boolean = false,
         pkg: String = WHATSAPP_BUSINESS_PACKAGE,
+        hasReplyAction: Boolean = true,
     ) = NotificationFacts(
         packageName = pkg,
         title = title,
@@ -38,7 +39,7 @@ class ManagerEngineTest {
         category = "msg",
         isGroupConversation = group,
         ids = listOf(jid),
-        hasReplyAction = true,
+        hasReplyAction = hasReplyAction,
         messages = listOf(NotifiedMessage(text, at, sender = sender)),
     )
 
@@ -73,6 +74,78 @@ class ManagerEngineTest {
         assertTrue(orderTextIsSafe(order.text))
         assertTrue(!order.text.contains("₹"))
         assertEquals("Raju", order.record.requestedBy)
+    }
+
+    @Test
+    fun labourRequestWithoutRemoteInputStillOrdersThatSupplier() {
+        val tags = InMemoryPartyTags().apply {
+            put(raju)
+            put(sharma)
+        }
+        val action = engine(tags).handle(
+            facts(
+                "Raju",
+                "need 10 teak",
+                "919811111111@s.whatsapp.net",
+                1_700_000_100_500L,
+                hasReplyAction = false,
+            ),
+        )
+        assertTrue(action is ManagerAction.SendOrders)
+        action as ManagerAction.SendOrders
+        val order = action.orders.single()
+        assertEquals("Sharma Timber", order.supplierName)
+        assertEquals("919800000001", order.digits)
+        assertEquals("Raju", order.record.requestedBy)
+        assertTrue(order.record.lines.contains("Teak"))
+        assertTrue(orderTextIsSafe(order.text))
+        assertTrue(!order.text.contains("₹"))
+        assertTrue(!order.digits.contains("919811111111"))
+
+        val open = dispatchSupplierOrder(
+            supplierName = order.supplierName,
+            digits = order.digits,
+            text = order.text,
+            accessibilityEnabled = true,
+        )
+        assertTrue(open is SupplierOrderDispatch.OpenSupplierChat)
+        open as SupplierOrderDispatch.OpenSupplierChat
+        assertEquals(WHATSAPP_BUSINESS_PACKAGE, open.packageName)
+        assertEquals(order.text, open.text)
+        assertTrue(open.sendsToSupplier(order.digits, order.text))
+        assertTrue(!open.sendsToSupplier("919811111111", order.text))
+
+        val held = dispatchSupplierOrder(
+            supplierName = order.supplierName,
+            digits = order.digits,
+            text = order.text,
+            accessibilityEnabled = false,
+        )
+        assertTrue(held is SupplierOrderDispatch.TellOwner)
+        held as SupplierOrderDispatch.TellOwner
+        assertEquals(order.text, held.orderText)
+        assertEquals(
+            unsentSupplierOrderNotice(
+                order.supplierName,
+                order.text,
+                "WhatsApp send is off. Turn on KAI WhatsApp send under Accessibility",
+            ),
+            held.notice,
+        )
+        assertTrue(held.notice.endsWith(order.text))
+        assertTrue(held.notice.contains("did not message"))
+        assertTrue(held.notice.contains("anyone else"))
+        assertTrue(!held.sendsToSupplier(order.digits, order.text))
+        assertTrue(!held.notice.contains("919811111111"))
+
+        val priced = dispatchSupplierOrder(
+            supplierName = order.supplierName,
+            digits = order.digits,
+            text = "Pay ₹500 by UPI",
+            accessibilityEnabled = true,
+        )
+        assertTrue(priced is SupplierOrderDispatch.TellOwner)
+        assertTrue(!priced.sendsToSupplier(order.digits, "Pay ₹500 by UPI"))
     }
 
     @Test

@@ -7,6 +7,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.books.BooksStore
+import com.kai.assistant.tools.WhatsAppSendAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,9 +16,10 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Reads only WhatsApp Business (`com.whatsapp.w4b`) notifications and replies through
- * each notification's own RemoteInput action. Personal WhatsApp and every other app
- * are ignored before any content is read.
+ * Reads only WhatsApp Business (`com.whatsapp.w4b`) notifications. Enquiry replies use
+ * that notification's free-text RemoteInput. A supplier order with no RemoteInput opens
+ * the tagged supplier chat in WhatsApp Business so the accessibility service can tap Send.
+ * Personal WhatsApp and every other app are ignored before any content is read.
  */
 class WhatsAppBusinessNotificationListenerService : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -159,18 +161,43 @@ class WhatsAppBusinessNotificationListenerService : NotificationListenerService(
             )
             return
         }
-        val replied = replyActions[order.supplierChatKey]?.let { NotificationReply.send(this, it, order.text) } == true
-        val sent = replied || BusinessWhatsAppSender.send(this, digits, order.text)
-        if (!sent) {
-            alert(
-                order.supplierName,
-                "Could not send the order to ${order.supplierName} on WhatsApp Business. " +
-                    "Turn on KAI under Accessibility if Send was not tapped. Nothing was recorded as sent.",
-                order.supplierChatKey,
-            )
+        val remote = replyActions[order.supplierChatKey]
+        if (remote != null && NotificationReply.send(this, remote, order.text)) {
+            BooksStore.get(this).apply(order.record)
             return
         }
-        BooksStore.get(this).apply(order.record)
+        when (
+            val plan = dispatchSupplierOrder(
+                supplierName = order.supplierName,
+                digits = digits,
+                text = order.text,
+                accessibilityEnabled = WhatsAppSendAccess.isEnabled(this),
+            )
+        ) {
+            is SupplierOrderDispatch.OpenSupplierChat -> {
+                if (!plan.sendsToSupplier(digits, order.text)) {
+                    holdOrder(order, "That order was not for the tagged supplier chat.")
+                    return
+                }
+                val opened = BusinessWhatsAppSender.send(this, plan.digits, plan.text)
+                if (!opened) {
+                    holdOrder(order, "Could not open ${order.supplierName} in WhatsApp Business.")
+                    return
+                }
+                BooksStore.get(this).apply(order.record)
+            }
+            is SupplierOrderDispatch.TellOwner ->
+                alert(order.supplierName, plan.notice, order.supplierChatKey)
+        }
+    }
+
+    /** Accessibility is off or the chat did not open. The owner sees the exact order. */
+    private fun holdOrder(order: OutboundOrder, why: String) {
+        alert(
+            order.supplierName,
+            unsentSupplierOrderNotice(order.supplierName, order.text, why),
+            order.supplierChatKey,
+        )
     }
 
     private fun alert(title: String, body: String, chatKey: String) {

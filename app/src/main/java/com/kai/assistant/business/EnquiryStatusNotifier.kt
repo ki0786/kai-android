@@ -84,16 +84,14 @@ object EnquiryStatusNotifier {
             Intent(context, MainActivity::class.java).putExtra(EXTRA_OPEN_INBOX, true),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val body = customerText.trim().ifEmpty { reason }.take(180)
+        val full = customerText.trim().ifEmpty { reason }
+        val preview = full.take(180)
+        val expanded = if (reason.isBlank() || full.isEmpty()) full.ifEmpty { reason } else "$reason\n\n$full"
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(customerName.ifBlank { "Customer" })
-            .setContentText(body)
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    if (reason.isBlank()) body else "$reason\n\n$body",
-                ),
-            )
+            .setContentText(preview)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

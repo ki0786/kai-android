@@ -75,6 +75,9 @@ class ManagerEngine(
             lastSeenAtMs = tag.lastSeenAtMs,
             lastSeenText = tag.lastText.ifBlank { null },
             recentKaiReplies = emptyList(),
+            // Vivo's WhatsApp Business notifications have a Reply button and no free-text
+            // RemoteInput. The order is not a reply in this chat.
+            requireReplyAction = false,
         )
         return when (decision) {
             is FilterDecision.Ignore -> {
@@ -238,6 +241,72 @@ class ManagerEngine(
             "hi", "hello", "coming", "on the way", "reached",
         )
     }
+}
+
+/**
+ * How a supplier order leaves the phone when that chat's notification has no
+ * free-text RemoteInput. This never pays and never names a second chat.
+ */
+sealed class SupplierOrderDispatch {
+    /**
+     * Open [digits] in WhatsApp Business with [text] in the composer.
+     * The accessibility service taps Send. [digits] is the tagged supplier only.
+     */
+    data class OpenSupplierChat(
+        val packageName: String,
+        val digits: String,
+        val text: String,
+    ) : SupplierOrderDispatch()
+
+    /** Accessibility is off, or the text is not safe to send. Nobody is messaged. */
+    data class TellOwner(
+        val orderText: String,
+        val notice: String,
+    ) : SupplierOrderDispatch()
+}
+
+/** True only for the tagged supplier's own WhatsApp Business chat and this exact text. */
+fun SupplierOrderDispatch.sendsToSupplier(digits: String, text: String): Boolean = when (this) {
+    is SupplierOrderDispatch.TellOwner -> false
+    is SupplierOrderDispatch.OpenSupplierChat ->
+        packageName == WHATSAPP_BUSINESS_PACKAGE &&
+            this.digits == digits &&
+            this.text == text &&
+            orderTextIsSafe(text)
+}
+
+/**
+ * No free-text RemoteInput. Opens that supplier chat for the accessibility send
+ * when WhatsApp send is on. Otherwise the owner gets [text] unchanged.
+ */
+fun dispatchSupplierOrder(
+    supplierName: String,
+    digits: String,
+    text: String,
+    accessibilityEnabled: Boolean,
+): SupplierOrderDispatch {
+    if (!accessibilityEnabled || !orderTextIsSafe(text)) {
+        val why = if (!orderTextIsSafe(text)) {
+            "That order mentioned a price or a payment, so it was not sent"
+        } else {
+            "WhatsApp send is off. Turn on KAI WhatsApp send under Accessibility"
+        }
+        return SupplierOrderDispatch.TellOwner(
+            orderText = text,
+            notice = unsentSupplierOrderNotice(supplierName, text, why),
+        )
+    }
+    return SupplierOrderDispatch.OpenSupplierChat(
+        packageName = WHATSAPP_BUSINESS_PACKAGE,
+        digits = digits,
+        text = text,
+    )
+}
+
+/** Owner alert. [orderText] is copied unchanged after the blank line. */
+fun unsentSupplierOrderNotice(supplierName: String, orderText: String, why: String): String {
+    val lead = why.trim().trimEnd('.')
+    return "$lead. I did not message $supplierName or anyone else. Nothing was recorded as sent.\n\n$orderText"
 }
 
 fun payableNotice(supplier: String, bill: Long, advance: Long, payable: Long): String {
