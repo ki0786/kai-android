@@ -1,5 +1,7 @@
 package com.kai.assistant.tools
 
+import com.kai.assistant.books.BooksAction
+
 /**
  * Device actions the local engine can run without a cloud round-trip.
  */
@@ -141,6 +143,9 @@ sealed class LocalCommand {
         val resolvedNumber: String? = null,
         val resolvedName: String? = null,
     ) : LocalCommand()
+
+    /** A business-books entry or summary. Kept on the phone. Does not pay or message anyone. */
+    data class Books(val action: BooksAction) : LocalCommand()
 }
 
 enum class SettingsSection(val label: String) {
@@ -192,7 +197,8 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.LaunchAppByName ||
         this is LocalCommand.SearchYouTube ||
         this is LocalCommand.OpenMaps ||
-        this is LocalCommand.OpenCamera
+        this is LocalCommand.OpenCamera ||
+        this is LocalCommand.Books
 
 fun LocalCommand.needsNotification(): Boolean = when (this) {
     is LocalCommand.StartTimer,

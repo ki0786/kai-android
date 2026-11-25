@@ -138,6 +138,19 @@ class RoutingPhraseTableTest {
         "navigate to mg road" to LocalCommand.OpenMaps::class,
         "directions to the airport" to LocalCommand.OpenMaps::class,
         "take a photo" to LocalCommand.OpenCamera::class,
+        // Business books stay on the phone. They do not pay anyone or message a supplier.
+        "I paid 5000 to the wood supplier" to LocalCommand.Books::class,
+        "Rahul owes me 12000" to LocalCommand.Books::class,
+        "electricity bill 2400 due on the 5th" to LocalCommand.Books::class,
+        "sold a sofa for 45000 advance 10000" to LocalCommand.Books::class,
+        "how are the books" to LocalCommand.Books::class,
+        "open business books" to LocalCommand.Books::class,
+        "rent 15000" to LocalCommand.Books::class,
+        "personal lunch 400" to LocalCommand.Books::class,
+        "a personal lunch 400" to LocalCommand.Books::class,
+        "bank loan 50000" to LocalCommand.Books::class,
+        "a bank loan 50000" to LocalCommand.Books::class,
+        "I paid 15000 for rent" to LocalCommand.Books::class,
     )
 
     private val toChat = listOf(

@@ -13,6 +13,10 @@ internal const val KAI_SYSTEM_PROMPT =
         "before they reach you. Never say you can't make calls, send messages or control the phone. " +
         "If the user asks for one of those actions, tell them the exact words to say, for example " +
         "\"call Kaif\", \"WhatsApp Kaif I'm on my way\" or \"set an alarm for 7 a.m.\". " +
+        "Business books for the furniture shop — sales, expenses, orders, labour, stock, bills and debts — " +
+        "are saved on this phone only. You cannot pay anyone, place a supplier order, or message a supplier. " +
+        "If the user is recording money, tell them to say it as a command, for example " +
+        "\"I paid 5000 to the wood supplier\". " +
         "Keep answers short and easy to speak aloud."
 
 private val questionLead = Regex(
