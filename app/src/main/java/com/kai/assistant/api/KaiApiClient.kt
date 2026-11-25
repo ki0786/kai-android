@@ -25,7 +25,36 @@ class KaiApiClient(
     private val client: OkHttpClient = defaultClient(),
     private val rediscover: suspend (failedUrl: String) -> String? = { null },
 ) {
-    private val root: String get() = baseUrl().trimEnd('/')
+    // Constructor property is also named baseUrl; call it via invoke so we do not
+    // recurse into the public baseUrl() method below.
+    private val root: String get() = baseUrl.invoke().trimEnd('/')
+
+    /**
+     * One-shot chat without a session id. Prefer [enquire] for WhatsApp Business
+     * classification — `/v1/chat` still prepends the phone-assistant system prompt.
+     */
+    suspend fun completeOnce(
+        messages: List<ChatMessage>,
+        forceCloud: Boolean = true,
+    ): ChatResult {
+        val payload = JSONObject().apply {
+            put("messages", messages.toJsonArray())
+            put("force_cloud", forceCloud)
+        }
+        return withRediscovery({ chatOffline(it) }) { base -> postChat(base, payload) }
+    }
+
+    /**
+     * POST /v1/enquiry — structured classification for the enquiry inbox.
+     * No session id, no planner, no phone-assistant prompt. Unparseable model
+     * output is HTTP 502 (`enquiry_unparseable`).
+     */
+    suspend fun enquire(messages: List<ChatMessage>): EnquiryResult {
+        val payload = JSONObject().put("messages", messages.toJsonArray())
+        return withRediscovery({
+            EnquiryResult(ok = false, offline = true)
+        }) { base -> postEnquiry(base, payload) }
+    }
 
     data class HealthResult(
         val ok: Boolean,
@@ -47,6 +76,20 @@ class KaiApiClient(
         val code: Int?,
         val provider: String? = null,
         val offline: Boolean = false,
+    )
+
+    /**
+     * Structured enquiry response. On success [body] is the JSON object
+     * (`category`, `topics`, `language`, `visit_date`, `visit_time`, `reply`, …).
+     */
+    data class EnquiryResult(
+        val ok: Boolean,
+        val body: String = "",
+        val code: Int? = null,
+        val provider: String? = null,
+        val model: String? = null,
+        val offline: Boolean = false,
+        val unparseable: Boolean = false,
     )
 
     fun health(): HealthResult {
@@ -120,6 +163,57 @@ class KaiApiClient(
                 }
             }
         }
+    }
+
+    private fun postEnquiry(base: String, payload: JSONObject): EnquiryResult {
+        val request = Request.Builder()
+            .url("$base/v1/enquiry")
+            .post(payload.toString().toRequestBody(JSON))
+            .build()
+
+        return client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            when {
+                response.isSuccessful -> {
+                    val parsed = runCatching { JSONObject(body) }.getOrNull()
+                        ?: return@use EnquiryResult(ok = false, body = body, code = response.code)
+                    EnquiryResult(
+                        ok = true,
+                        body = body,
+                        code = response.code,
+                        provider = parsed.optString("provider").ifBlank { null },
+                        model = parsed.optString("model").ifBlank { null },
+                    )
+                }
+                response.code == 502 && isEnquiryUnparseable(body) -> EnquiryResult(
+                    ok = false,
+                    body = body,
+                    code = 502,
+                    unparseable = true,
+                )
+                else -> EnquiryResult(
+                    ok = false,
+                    body = body,
+                    code = response.code,
+                )
+            }
+        }
+    }
+
+    private fun isEnquiryUnparseable(body: String): Boolean {
+        if (body.contains("enquiry_unparseable")) return true
+        return runCatching {
+            val detail = JSONObject(body).opt("detail")
+            when (detail) {
+                is String -> detail.contains("enquiry_unparseable")
+                is JSONObject -> {
+                    detail.optString("error").contains("enquiry_unparseable") ||
+                        detail.optString("code").contains("enquiry_unparseable") ||
+                        detail.optString("message").contains("enquiry_unparseable")
+                }
+                else -> false
+            }
+        }.getOrDefault(false)
     }
 
     /**
@@ -249,24 +343,29 @@ class KaiApiClient(
 
     companion object {
         /** The app's client: shared saved address plus Wi‑Fi rediscovery. */
-        fun forDevice(context: android.content.Context): KaiApiClient {
+        fun forDevice(
+            context: android.content.Context,
+            callTimeoutSeconds: Long = 60L,
+        ): KaiApiClient {
             val endpoint = BackendEndpoint.get(context)
             val locator = BackendLocator(context.applicationContext, endpoint)
             return KaiApiClient(
                 baseUrl = { endpoint.current() },
+                client = defaultClient(callTimeoutSeconds),
                 rediscover = { failed -> locator.rediscover(failed) },
             )
         }
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
-        private fun defaultClient(): OkHttpClient {
+        private fun defaultClient(callTimeoutSeconds: Long = 60L): OkHttpClient {
             val logging = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             }
             return OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
+                .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
                 .addInterceptor(logging)
                 .build()
         }
