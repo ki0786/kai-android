@@ -67,17 +67,31 @@ class WakePolicyTest {
         assertTrue(line.startsWith("$HEY_KAI_TOKENS "))
         assertTrue(line.contains(":1.50"))
         assertTrue(line.contains("#0.25"))
-        assertTrue(line.endsWith("@HEY KAI"))
+        assertTrue(line.endsWith("@HEYKAI"))
         assertFalse(line.contains(","))
+    }
+
+    @Test
+    fun keywordLineDoesNotContainBareKaiToken() {
+        for (sensitivity in floatArrayOf(0f, 0.5f, 1f)) {
+            val line = heyKaiKeywordLine(sensitivity)
+            val words = line.trim().split(Regex("\\s+"))
+            assertFalse(words.any { it.equals("KAI", ignoreCase = true) })
+            assertEquals(listOf("▁HE", "Y", "▁K", "A", "I"), words.take(5))
+            assertTrue(isHeyKaiSpot(words.last().removePrefix("@")))
+        }
     }
 
     @Test
     fun spotResultMatchesHeyKaiOnly() {
         assertTrue(isHeyKaiSpot("HEY KAI"))
         assertTrue(isHeyKaiSpot("hey kai"))
+        assertTrue(isHeyKaiSpot("HEYKAI"))
+        assertTrue(isHeyKaiSpot("heykai"))
         assertTrue(isHeyKaiSpot(HEY_KAI_TOKENS))
         assertFalse(isHeyKaiSpot(""))
         assertFalse(isHeyKaiSpot("HEY SIRI"))
+        assertFalse(isHeyKaiSpot("KAI"))
     }
 
     @Test

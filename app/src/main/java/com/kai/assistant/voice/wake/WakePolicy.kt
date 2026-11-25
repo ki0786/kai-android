@@ -5,12 +5,19 @@ import java.util.Locale
 /** Android 15 (API 35) blocks microphone foreground services started from BOOT_COMPLETED. */
 internal const val ANDROID_15_API = 35
 
-internal const val HEY_KAI_PHRASE = "HEY KAI"
+/**
+ * Phrase sherpa returns for this keyword. It is one word on purpose.
+ * EncodeKeywords splits the line on whitespace and looks up every word that
+ * does not start with `:`, `#`, or `@`. `@HEY KAI` looks up `KAI`, which this
+ * model does not have, and that failure aborts the process.
+ */
+internal const val HEY_KAI_PHRASE = "HEYKAI"
 
 /**
  * BPE pieces for "HEY KAI" from the GigaSpeech zipformer KWS model
  * (`sherpa-onnx-kws-zipformer-gigaspeech-3.3M`, bpe.model). Same tokenizer that
  * encodes the bundled "HEY SIRI" line as `▁HE Y ▁S I RI`.
+ * The pieces are `▁HE`, `Y`, `▁K`, `A`, `I` — there is no whole-word `KAI`.
  */
 internal const val HEY_KAI_TOKENS = "▁HE Y ▁K A I"
 
@@ -100,6 +107,8 @@ internal fun keywordsThreshold(sensitivity: Float): Float {
 
 internal fun heyKaiKeywordLine(sensitivity: Float): String {
     val threshold = keywordsThreshold(sensitivity)
+    // `@` must be a single whitespace-delimited word. A space after it is
+    // another token, and sherpa looks that token up in tokens.txt.
     return "%s :%.2f #%.2f @%s".format(
         Locale.US,
         HEY_KAI_TOKENS,
@@ -112,8 +121,12 @@ internal fun heyKaiKeywordLine(sensitivity: Float): String {
 internal fun isHeyKaiSpot(result: String): Boolean {
     val text = result.trim()
     if (text.isEmpty()) return false
+    if (text.contains(HEY_KAI_TOKENS)) return true
     val norm = text.lowercase(Locale.US)
-    return norm == "hey kai" || norm.endsWith("@hey kai") || text.contains(HEY_KAI_TOKENS)
+    return norm == "hey kai" ||
+        norm == "heykai" ||
+        norm.endsWith("@hey kai") ||
+        norm.endsWith("@heykai")
 }
 
 /**
