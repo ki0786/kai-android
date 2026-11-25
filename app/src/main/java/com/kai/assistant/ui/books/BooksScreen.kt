@@ -105,7 +105,7 @@ fun BooksScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Sagar Furniture. Saved on this phone only. KAI does not pay anyone, order from a supplier, or message them.",
+                text = "Sagar Furniture. Saved on this phone only. KAI does not pay anyone. A supplier is messaged only after you tag that chat as Supplier and a tagged labour asks for a material saved against them.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -362,6 +362,18 @@ private fun DuesSection(
     now: Long,
     save: (BooksAction) -> Unit,
 ) {
+    if (snapshot.purchaseOrders.isNotEmpty() || snapshot.supplierBills.isNotEmpty()) {
+        Text("Workshop", style = MaterialTheme.typography.titleMedium)
+        snapshot.purchaseOrders.asReversed().take(8).forEach { order ->
+            Text("Order · ${order.supplier} · ${order.lines} · asked by ${order.requestedBy}")
+        }
+        snapshot.supplierBills.asReversed().take(8).forEach { bill ->
+            Text(
+                "Bill · ${bill.supplier} · ${formatRupees(bill.billAmount)} · advance ${formatRupees(bill.advance)} · pay ${formatRupees(bill.payable)}",
+            )
+        }
+        HorizontalDivider()
+    }
     Text("Vendor payments", style = MaterialTheme.typography.titleMedium)
     VendorForm(zone, save)
     snapshot.vendorDues.asReversed().forEach { due ->

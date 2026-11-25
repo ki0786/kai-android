@@ -34,6 +34,8 @@ class BooksStore internal constructor(
         receivables = snapshot.receivables.takeLast(MAX_EACH),
         debts = snapshot.debts.takeLast(MAX_EACH),
         bills = snapshot.bills.takeLast(MAX_EACH),
+        purchaseOrders = snapshot.purchaseOrders.takeLast(MAX_EACH),
+        supplierBills = snapshot.supplierBills.takeLast(MAX_EACH),
     )
 
     private fun save(snapshot: BooksSnapshot) {

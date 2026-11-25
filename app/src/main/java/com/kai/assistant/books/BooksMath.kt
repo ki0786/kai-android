@@ -35,6 +35,28 @@ data class BooksSummary(
 
 fun orderBalance(amount: Long, advance: Long): Long = (amount - advance).coerceAtLeast(0)
 
+/** What is still unpaid after the advance already saved against this supplier. Never negative. */
+fun payableRupees(billAmount: Long, advance: Long): Long {
+    if (billAmount <= 0) return 0
+    return (billAmount - advance.coerceAtLeast(0)).coerceAtLeast(0)
+}
+
+/**
+ * Business money already paid to [supplier] whose note says it is an advance,
+ * minus advances already applied to earlier supplier bills.
+ * A plain "I paid" entry is not an advance, so it is not subtracted from a new bill.
+ */
+fun recordedAdvanceRupees(snapshot: BooksSnapshot, supplier: String): Long {
+    val noted = snapshot.money.filter { entry ->
+        entry.direction == MoneyDirection.OUT &&
+            entry.scope == MoneyScope.BUSINESS &&
+            namesMatch(entry.party, supplier) &&
+            entry.note.contains("advance", ignoreCase = true)
+    }.sumOf { it.amount }
+    val used = snapshot.supplierBills.filter { namesMatch(it.supplier, supplier) }.sumOf { it.advance }
+    return (noted - used).coerceAtLeast(0)
+}
+
 fun formatRupees(amount: Long): String {
     val digits = abs(amount).toString()
     val grouped = if (digits.length <= 3) {

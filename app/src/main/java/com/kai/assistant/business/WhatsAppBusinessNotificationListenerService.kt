@@ -6,6 +6,7 @@ import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.kai.assistant.api.KaiApiClient
+import com.kai.assistant.books.BooksStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,14 @@ class WhatsAppBusinessNotificationListenerService : NotificationListenerService(
         )
     }
 
+    private val manager: ManagerEngine by lazy {
+        val app = applicationContext
+        ManagerEngine(
+            tags = PartyTagStore.get(app),
+            books = { BooksStore.get(app).books.value },
+        )
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         EnquiryStatusNotifier.ensureChannels(this)
@@ -56,23 +65,122 @@ class WhatsAppBusinessNotificationListenerService : NotificationListenerService(
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
         if (sbn.packageName != WHATSAPP_BUSINESS_PACKAGE) return
-        if (!AutoReplySettings.get(this).isEnabled()) return
-        if (!BusinessInfoStore.get(this).current().readyForAutoReply) return
 
         val notification = sbn.notification ?: return
+        if (!shouldRead(sbn, notification)) return
         val facts = toFacts(sbn, notification) ?: return
+        val key = ChatFilter.chatKey(facts)
+        val tagged = PartyTagStore.get(this).find(key, ChatFilter.customerName(facts)) != null
+        val route = routeWhatsAppBusiness(
+            hasPartyTag = tagged,
+            autoReplyOn = AutoReplySettings.get(this).isEnabled(),
+            businessReady = BusinessInfoStore.get(this).current().readyForAutoReply,
+        )
+        if (route == IncomingRoute.Ignore) return
+
         val reply = NotificationReply.find(notification)
         if (reply != null) {
-            replyActions[ChatFilter.chatKey(facts)] = reply
+            replyActions[key] = reply
         }
-        val key = ChatFilter.chatKey(facts)
         pending.remove(key)?.let { main.removeCallbacks(it.runnable) }
         val runnable = Runnable {
             pending.remove(key)
-            scope.launch { handle(facts, key) }
+            scope.launch {
+                when (route) {
+                    IncomingRoute.Manager -> handleManager(facts)
+                    IncomingRoute.Enquiry -> handle(facts, key)
+                    IncomingRoute.Ignore -> Unit
+                }
+            }
         }
         pending[key] = Debounced(facts, runnable)
         main.postDelayed(runnable, DEBOUNCE_MS)
+    }
+
+    /**
+     * Message text is read only for a tagged labour or supplier chat, or while customer
+     * auto-reply is on. Other WhatsApp Business chats are left alone.
+     */
+    private fun shouldRead(sbn: StatusBarNotification, notification: Notification): Boolean {
+        val extras = notification.extras
+        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val ids = buildList {
+            sbn.tag?.let { add(it) }
+            sbn.key?.let { add(it) }
+            notification.shortcutId?.let { add(it) }
+            extras?.getString(Notification.EXTRA_CONVERSATION_TITLE)?.let { add(it) }
+        }
+        val preview = NotificationFacts(
+            packageName = sbn.packageName,
+            title = title,
+            text = null,
+            postedAtMs = sbn.postTime,
+            ids = ids,
+        )
+        val tagged = PartyTagStore.get(this).find(ChatFilter.chatKey(preview), ChatFilter.customerName(preview)) != null
+        val enquiryOn = AutoReplySettings.get(this).isEnabled() &&
+            BusinessInfoStore.get(this).current().readyForAutoReply
+        return tagged || enquiryOn
+    }
+
+    private fun handleManager(facts: NotificationFacts) {
+        when (val action = manager.handle(facts)) {
+            ManagerAction.Skip -> Unit
+            is ManagerAction.Alert -> alert(action.title, action.body, action.chatKey)
+            is ManagerAction.NotifyPayable -> {
+                BooksStore.get(this).apply(action.record)
+                alert(action.supplierName, action.notice, action.chatKey)
+            }
+            is ManagerAction.SendOrders -> {
+                action.orders.forEach { order -> sendOrder(order) }
+                if (action.skipped.isNotBlank()) {
+                    alert(action.labourName, "Not ordered:\n${action.skipped}", action.chatKey)
+                }
+            }
+        }
+    }
+
+    /**
+     * Sends only when the chat is still tagged Supplier and the number is the one on that tag.
+     * A number written inside the labour message is never used.
+     */
+    private fun sendOrder(order: OutboundOrder) {
+        if (!orderTextIsSafe(order.text)) {
+            alert(order.supplierName, "That order mentioned a price or a payment, so it was not sent.", order.supplierChatKey)
+            return
+        }
+        val tag = PartyTagStore.get(this).find(order.supplierChatKey, order.supplierName)
+        val digits = tag?.takeIf { it.role == PartyRole.SUPPLIER }?.let { whatsAppDigits(it.chatKey) }
+        if (tag == null || digits == null || digits != order.digits) {
+            alert(
+                order.supplierName,
+                "I did not message anyone. ${order.supplierName} is not a tagged Supplier with a WhatsApp number.",
+                order.supplierChatKey,
+            )
+            return
+        }
+        val replied = replyActions[order.supplierChatKey]?.let { NotificationReply.send(this, it, order.text) } == true
+        val sent = replied || BusinessWhatsAppSender.send(this, digits, order.text)
+        if (!sent) {
+            alert(
+                order.supplierName,
+                "Could not send the order to ${order.supplierName} on WhatsApp Business. " +
+                    "Turn on KAI under Accessibility if Send was not tapped. Nothing was recorded as sent.",
+                order.supplierChatKey,
+            )
+            return
+        }
+        BooksStore.get(this).apply(order.record)
+    }
+
+    private fun alert(title: String, body: String, chatKey: String) {
+        EnquiryStatusNotifier.alertOwner(
+            this,
+            customerName = title,
+            customerText = body,
+            reason = "",
+            chatKey = chatKey,
+        )
     }
 
     private suspend fun handle(facts: NotificationFacts, chatKey: String) {
