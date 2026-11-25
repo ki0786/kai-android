@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.kai.assistant.voice.wake.WakePrefs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -23,6 +24,10 @@ data class KaiSettings(
     /** Keep a log of conversation turns on this phone. Off until the user turns it on. */
     val chatHistoryEnabled: Boolean = false,
     val darkTheme: Boolean = false,
+    /** Background "Hey KAI". Off until the user turns it on. */
+    val backgroundHeyKai: Boolean = false,
+    /** 0 is stricter, 1 triggers more easily. 0.5 matches the model's usual threshold. */
+    val heyKaiSensitivity: Float = 0.5f,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -33,6 +38,8 @@ class SettingsRepository(private val context: Context) {
         val memoryEnabled = booleanPreferencesKey("memory_enabled")
         val darkTheme = booleanPreferencesKey("dark_theme")
         val chatHistory = booleanPreferencesKey("chat_history_enabled")
+        val backgroundHeyKai = booleanPreferencesKey("background_hey_kai")
+        val heyKaiSensitivity = floatPreferencesKey("hey_kai_sensitivity")
     }
 
     val settings: Flow<KaiSettings> = context.dataStore.data.map { prefs ->
@@ -45,6 +52,8 @@ class SettingsRepository(private val context: Context) {
             memoryEnabled = prefs[Keys.memoryEnabled] ?: true,
             darkTheme = prefs[Keys.darkTheme] ?: false,
             chatHistoryEnabled = prefs[Keys.chatHistory] ?: false,
+            backgroundHeyKai = prefs[Keys.backgroundHeyKai] ?: false,
+            heyKaiSensitivity = (prefs[Keys.heyKaiSensitivity] ?: 0.5f).coerceIn(0f, 1f),
         )
     }
 
@@ -70,5 +79,16 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDarkTheme(enabled: Boolean) {
         context.dataStore.edit { it[Keys.darkTheme] = enabled }
+    }
+
+    suspend fun setBackgroundHeyKai(enabled: Boolean) {
+        WakePrefs.setEnabled(context, enabled)
+        context.dataStore.edit { it[Keys.backgroundHeyKai] = enabled }
+    }
+
+    suspend fun setHeyKaiSensitivity(sensitivity: Float) {
+        val clamped = sensitivity.coerceIn(0f, 1f)
+        WakePrefs.setSensitivity(context, clamped)
+        context.dataStore.edit { it[Keys.heyKaiSensitivity] = clamped }
     }
 }

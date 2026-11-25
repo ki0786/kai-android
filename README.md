@@ -48,16 +48,16 @@ You do **not** need the backend for local phone commands (flashlight, battery, v
 
 | Permission | When used |
 |------------|-----------|
-| `RECORD_AUDIO` | Only while you **hold** the push-to-talk button (runtime prompt on first use) |
+| `RECORD_AUDIO` | Push-to-talk, the voice screen, and background Hey KAI after you turn that on |
 | `INTERNET` | Backend chat + on-device STT that uses network recognizers |
 | `ACCESS_NETWORK_STATE` | “Am I online?” local tool |
 | `FLASHLIGHT` | Torch via `CameraManager` (hardware permitting) |
 | `READ_CONTACTS` | Match “call <name>”, WhatsApp messages, and WhatsApp calls on this device. Numbers are not uploaded. |
 | `CALL_PHONE` | Place a phone call with `ACTION_CALL`, and start a WhatsApp voice or video call, after you allow it. The number is not uploaded. |
-| `POST_NOTIFICATIONS` | Tell you when a timer or reminder is due. The text stays on this phone. |
+| `POST_NOTIFICATIONS` | Timers, reminders, and the “KAI is listening for Hey KAI” notification |
 | Screen capture | “Take a screenshot” asks once per session, then saves the picture on the phone. |
 
-Mic status is always visible in the UI. There is **no** background / always-on recording and no wake word in this milestone.
+Mic status is always visible. Background Hey KAI is **off** until you turn it on from the home screen. It spots “hey kai” on the phone with Sherpa-ONNX (no cloud audio). The first run downloads a small English model from the public sherpa-onnx release. Allow the microphone, notifications, and unrestricted battery use when asked. On Android 15, after a reboot, tap the notification to start listening again.
 
 Sensitive local actions (launch app, alarm/timer, maps navigation, camera) ask for confirmation in a dialog before running. A call to one matching contact starts immediately with `ACTION_CALL` after you allow phone calls — there is no confirm dialog and no extra tap in the dialer. If the contact is missing or several people match, KAI says so on the phone and does not send the utterance to the backend. “Send hi to Mohammed Kaif on WhatsApp” stays on the phone, opens that chat with the text filled in, and a KAI accessibility service taps WhatsApp’s Send button once. Turn that service on the first time it asks. If it is off, KAI says so and still opens the chat. The service does not run for calls. “Call Mohammed Kaif on WhatsApp” and “video call Mohammed Kaif on WhatsApp” start that contact’s WhatsApp voice or video call. A missing WhatsApp install is reported on the device.
 
@@ -112,7 +112,7 @@ Anything else that does not match a local command is sent to `POST /v1/chat` wit
 
 ## Out of scope (later)
 
-Wake word, Hindi/Kannada quality polish, multi-step task planner, memory CRUD UI beyond the existing toggle.
+Hindi/Kannada quality polish, multi-step task planner, memory CRUD UI beyond the existing toggle.
 
 ## License
 

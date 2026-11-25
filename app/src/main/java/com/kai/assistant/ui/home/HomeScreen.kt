@@ -41,13 +41,18 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.R
+import com.kai.assistant.data.SettingsRepository
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
+import com.kai.assistant.voice.wake.WakePresence
+import com.kai.assistant.voice.wake.WakeRuntime
 import kotlin.math.sin
 
 @Composable
 fun HomeScreen(
+    settingsRepository: SettingsRepository,
     onStartVoice: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -55,6 +60,7 @@ fun HomeScreen(
     onOpenBooks: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
+    val presence by WakeRuntime.presence.collectAsStateWithLifecycle()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -78,7 +84,7 @@ fun HomeScreen(
         ) {
             Box(modifier = Modifier.fillMaxWidth()) {
                 MicStatusChip(
-                    status = MicStatus.Off,
+                    status = presence.asMicStatus(),
                     modifier = Modifier.align(Alignment.CenterStart),
                 )
                 IconButton(
@@ -111,12 +117,7 @@ fun HomeScreen(
             AnimatedOrbPlaceholder()
             Spacer(modifier = Modifier.height(28.dp))
 
-            Text(
-                text = stringResource(R.string.privacy_no_background),
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            BackgroundHeyKaiControl(settingsRepository = settingsRepository)
 
             Spacer(modifier = Modifier.height(28.dp))
 
@@ -162,6 +163,13 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+}
+
+private fun WakePresence.asMicStatus(): MicStatus = when (this) {
+    WakePresence.Off -> MicStatus.Off
+    WakePresence.Standby -> MicStatus.Standby
+    WakePresence.Listening -> MicStatus.Listening
+    WakePresence.Paused -> MicStatus.Paused
 }
 
 @Composable

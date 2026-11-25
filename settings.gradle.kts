@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // sherpa-onnx publishes the Android AAR (native keyword spotter) here.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
