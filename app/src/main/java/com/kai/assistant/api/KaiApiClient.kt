@@ -27,6 +27,22 @@ class KaiApiClient(
 ) {
     private val root: String get() = baseUrl().trimEnd('/')
 
+    /**
+     * One-shot chat for business enquiry wording. No session id is sent, so the
+     * backend cannot mix this with the owner's personal assistant transcript.
+     * [forceCloud] asks the backend to skip its on-phone planner when it supports that.
+     */
+    suspend fun completeOnce(
+        messages: List<ChatMessage>,
+        forceCloud: Boolean = true,
+    ): ChatResult {
+        val payload = JSONObject().apply {
+            put("messages", messages.toJsonArray())
+            put("force_cloud", forceCloud)
+        }
+        return withRediscovery({ chatOffline(it) }) { base -> postChat(base, payload) }
+    }
+
     data class HealthResult(
         val ok: Boolean,
         val body: String,
@@ -249,24 +265,29 @@ class KaiApiClient(
 
     companion object {
         /** The app's client: shared saved address plus Wi‑Fi rediscovery. */
-        fun forDevice(context: android.content.Context): KaiApiClient {
+        fun forDevice(
+            context: android.content.Context,
+            callTimeoutSeconds: Long = 60L,
+        ): KaiApiClient {
             val endpoint = BackendEndpoint.get(context)
             val locator = BackendLocator(context.applicationContext, endpoint)
             return KaiApiClient(
                 baseUrl = { endpoint.current() },
+                client = defaultClient(callTimeoutSeconds),
                 rediscover = { failed -> locator.rediscover(failed) },
             )
         }
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
-        private fun defaultClient(): OkHttpClient {
+        private fun defaultClient(callTimeoutSeconds: Long = 60L): OkHttpClient {
             val logging = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             }
             return OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
+                .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
                 .addInterceptor(logging)
                 .build()
         }
