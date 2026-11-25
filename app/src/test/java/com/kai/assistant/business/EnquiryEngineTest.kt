@@ -108,4 +108,14 @@ class EnquiryEngineTest {
         assertTrue(action.text.contains("123 MG Road"))
         assertTrue(!action.text.contains("999"))
     }
+
+    @Test
+    fun unreachableBrainFallsBackToLocalAddress() = runBlocking {
+        val brain = EnquiryBrain { null }
+        val action = engine(brain = brain).handle(customerFacts("What is your address?"))
+        assertTrue(action is EngineAction.Reply)
+        action as EngineAction.Reply
+        assertTrue(action.text.contains("123 MG Road"))
+        assertTrue(!action.alertOwner)
+    }
 }

@@ -36,20 +36,21 @@ fun interface EnquiryBrain {
 }
 
 /**
- * The existing `POST /v1/chat` endpoint, asked for one JSON object. Only the message
- * text and the business info are sent: no customer name, no number, no session id.
+ * `POST /v1/enquiry` — structured classification. Only the prompt messages and
+ * business facts are sent: no customer name, no number, no session id.
+ * Unreachable / unparseable responses return null so [EnquiryEngine] can fall
+ * back to local address/hours rules.
  */
 class BackendEnquiryBrain(private val api: KaiApiClient) : EnquiryBrain {
     override suspend fun ask(request: BrainRequest): BrainAnswer? = withContext(Dispatchers.IO) {
-        val result = api.completeOnce(
+        val result = api.enquire(
             listOf(
                 ChatMessage(role = MessageRole.System, text = EnquiryPrompt.system(request)),
                 ChatMessage(role = MessageRole.User, text = EnquiryPrompt.user(request)),
             ),
         )
-        // The backend's phone-action planner answering means it never saw the question.
-        if (!result.ok || result.provider == "local_planner") return@withContext null
-        EnquiryPrompt.parse(result.reply)
+        if (!result.ok) return@withContext null
+        EnquiryPrompt.parse(result.body)
     }
 }
 
