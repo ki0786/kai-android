@@ -54,6 +54,14 @@ class MaterialRequestParserTest {
     }
 
     @Test
+    fun sheetsOfPlywoodKeepsTheMaterialName() {
+        val lines = MaterialRequestParser.parse("10 sheets of plywood")
+        assertEquals("Plywood", lines.single().name)
+        assertEquals(10.0, lines.single().qty, 0.0)
+        assertEquals("sheet", lines.single().unit)
+    }
+
+    @Test
     fun twoNumbersWithoutAUnitAreNotGuessed() {
         assertTrue(MaterialRequestParser.parse("plywood 10 20").isEmpty())
     }

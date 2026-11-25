@@ -10,8 +10,10 @@
     <string name="mic_idle">Mic off</string>
     <string name="mic_listening">Listening</string>
     <string name="mic_processing">Processing</string>
-    <string name="privacy_no_background">Android won\'t keep the microphone on in the background. Say Hey KAI on the voice screen.</string>
-    <string name="wake_background_limit">Android won\'t keep the microphone on in the background. Hey KAI only listens while this screen is open. The microphone stays visible.</string>
+    <string name="privacy_no_background">Background Hey KAI is off. Say Hey KAI on the voice screen, or turn it on below.</string>
+    <string name="wake_background_limit">On this screen, Hey KAI listens while the screen is open. The microphone stays visible.</string>
+    <string name="wake_background_on">Background Hey KAI is on. This screen listens for the command. Audio stays on this phone.</string>
+    <string name="hey_kai_toggle">Background Hey KAI</string>
     <string name="whatsapp_send_accessibility_description">After you ask KAI to send a WhatsApp message, this taps WhatsApp\'s Send button once. It does not read other apps or tap anything else.</string>
     <string name="screen_reader_accessibility_description">When you ask what is on your screen, KAI reads the visible text and controls once. It does not tap anything and does not send the screen to a server.</string>
 </resources>

@@ -15,6 +15,8 @@ import com.kai.assistant.tools.recognizerLanguageTag
 import com.kai.assistant.tools.replyLanguage
 import com.kai.assistant.tools.staysOnDevice
 import com.kai.assistant.ui.components.MicStatus
+import com.kai.assistant.voice.wake.WakePrefs
+import com.kai.assistant.voice.wake.WakeTurnGate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -131,6 +133,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     partialText = "",
                 )
             }
+            releaseWakeIfIdle()
         },
         onListeningChanged = { listening ->
             if (listening) {
@@ -154,6 +157,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     private var wakeScreenOpen = false
     private var wakeMicGranted = false
+    private var backgroundHeyKai = WakePrefs.isEnabled(application)
 
     init {
         _ui.update { it.copy(sttAvailable = stt.isAvailable()) }
@@ -161,12 +165,16 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             _ui.map { it.phase to (it.pendingConfirmation != null) }
                 .distinctUntilChanged()
                 .collect { (phase, confirming) ->
+                    val busy = phase != VoicePhase.Idle || confirming
+                    WakeTurnGate.onVoiceSession(busy)
                     if (!wakeScreenOpen) return@collect
-                    if (phase != VoicePhase.Idle || confirming) wake.disarm() else armWake()
+                    if (backgroundHeyKai || busy) wake.disarm() else armWake()
                 }
         }
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
+                backgroundHeyKai = settings.backgroundHeyKai
+                if (backgroundHeyKai) wake.disarm()
                 settingsLanguage = settings.languageCode
                 stt.setLanguageTag(recognizerLanguageTag(settings.languageCode))
                 tts.updatePreferences(
@@ -191,20 +199,36 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             }
             return
         }
+        if (backgroundHeyKai) {
+            wake.disarm()
+            _ui.update { it.copy(wakeArmed = false, statusLine = "Say your command, or hold the mic.") }
+            return
+        }
         if (_ui.value.phase == VoicePhase.Idle && _ui.value.pendingConfirmation == null) {
             _ui.update { it.copy(statusLine = "Say Hey KAI, or hold the mic to talk.") }
             armWake()
         }
     }
 
+    /** Background Hey KAI already released its microphone. Start the command recognizer. */
+    fun onBackgroundWake() {
+        if (_ui.value.pendingConfirmation != null) return
+        wake.disarm()
+        onPushToTalkPressed()
+    }
+
     fun onWakeScreenClosed() {
         wakeScreenOpen = false
         wake.disarm()
+        if (_ui.value.phase == VoicePhase.Listening) {
+            stt.cancel()
+        }
         _ui.update { it.copy(wakeArmed = false) }
     }
 
     fun onPushToTalkPressed() {
         if (_ui.value.pendingConfirmation != null) return
+        WakeTurnGate.onVoiceSession(true)
         wake.disarm()
         tts.stop()
         SpokenAlert.stop()
@@ -212,6 +236,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             _ui.update {
                 it.copy(statusLine = "Speech recognition unavailable. Use text chat instead.")
             }
+            releaseWakeIfIdle()
             return
         }
         stt.startListening()
@@ -332,6 +357,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                     partialText = "",
                 )
             }
+            releaseWakeIfIdle()
             return
         }
         _ui.update {
@@ -433,7 +459,14 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun releaseWakeIfIdle() {
+        val state = _ui.value
+        val busy = state.phase != VoicePhase.Idle || state.pendingConfirmation != null
+        WakeTurnGate.onVoiceSession(busy)
+    }
+
     private fun armWake() {
+        if (backgroundHeyKai) return
         if (!wakeScreenOpen || !wakeMicGranted) return
         if (_ui.value.phase != VoicePhase.Idle || _ui.value.pendingConfirmation != null) return
         if (!wake.onDeviceAvailable()) {
@@ -444,6 +477,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        WakeTurnGate.onVoiceSession(false)
         wake.destroy()
         stt.destroy()
         tts.destroy()

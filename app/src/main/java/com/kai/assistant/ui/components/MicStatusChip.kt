@@ -24,9 +24,13 @@ import androidx.compose.ui.unit.dp
 enum class MicStatus {
     Off,
     Wake,
+    /** Background listener is waiting for "Hey KAI". */
+    Standby,
     Listening,
     Processing,
     Speaking,
+    /** Call, or another app has the microphone. */
+    Paused,
 }
 
 @Composable
@@ -37,9 +41,11 @@ fun MicStatusChip(
     val (label, color, icon) = when (status) {
         MicStatus.Off -> Triple("Mic off", MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.MicOff)
         MicStatus.Wake -> Triple("Hey KAI", Color(0xFF059669), Icons.Filled.Mic)
+        MicStatus.Standby -> Triple("Hey KAI", Color(0xFF059669), Icons.Filled.Mic)
         MicStatus.Listening -> Triple("Listening", Color(0xFF059669), Icons.Filled.Mic)
         MicStatus.Processing -> Triple("Processing", Color(0xFFD97706), Icons.Filled.Mic)
         MicStatus.Speaking -> Triple("Speaking", Color(0xFF2563EB), Icons.AutoMirrored.Filled.VolumeUp)
+        MicStatus.Paused -> Triple("Paused", Color(0xFFD97706), Icons.Filled.MicOff)
     }
 
     Row(
@@ -52,7 +58,7 @@ fun MicStatusChip(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = label,
+            contentDescription = if (status == MicStatus.Paused) "Paused (in call)" else label,
             tint = color,
             modifier = Modifier.size(16.dp),
         )

@@ -19,6 +19,7 @@ import com.kai.assistant.ui.voice.VoiceSessionScreen
 fun KaiApp(
     settingsRepository: SettingsRepository,
     openEnquiryInbox: Boolean = false,
+    voiceLaunchToken: Long = 0L,
 ) {
     val navController = rememberNavController()
 
@@ -30,12 +31,21 @@ fun KaiApp(
         }
     }
 
+    LaunchedEffect(voiceLaunchToken) {
+        if (voiceLaunchToken != 0L) {
+            navController.navigate(KaiDestination.Voice.route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = KaiDestination.Home.route,
     ) {
         composable(KaiDestination.Home.route) {
             HomeScreen(
+                settingsRepository = settingsRepository,
                 onStartVoice = { navController.navigate(KaiDestination.Voice.route) },
                 onOpenChat = { navController.navigate(KaiDestination.Chat.route) },
                 onOpenSettings = { navController.navigate(KaiDestination.Settings.route) },
@@ -45,6 +55,7 @@ fun KaiApp(
         }
         composable(KaiDestination.Voice.route) {
             VoiceSessionScreen(
+                wakeListenToken = voiceLaunchToken,
                 onBack = { navController.popBackStack() },
                 onOpenChat = {
                     navController.navigate(KaiDestination.Chat.route) {

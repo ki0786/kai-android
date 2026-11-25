@@ -2,6 +2,8 @@ package com.kai.assistant.books
 
 import com.kai.assistant.tools.LocalCommand
 import com.kai.assistant.tools.LocalIntentRouter
+import com.kai.assistant.tools.planLocalSteps
+import com.kai.assistant.tools.researchQuery
 import com.kai.assistant.tools.staysOnDevice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -120,6 +122,39 @@ class BooksVoiceTest {
         val vendor = books("I owe the wood supplier 15000 due on the 10th") as BooksAction.VendorDue
         assertEquals("Wood Supplier", vendor.vendor)
         assertEquals(10, java.time.Instant.ofEpochMilli(vendor.dueEpochMs!!).atZone(zone).dayOfMonth)
+    }
+
+    @Test
+    fun saleAndLabourMaterialStayInTheBooks() {
+        val sale = books("sold a sofa for 25000") as BooksAction.Order
+        assertEquals("Sofa", sale.item)
+        assertEquals(25_000, sale.amount)
+        assertEquals(0, sale.advance)
+        val recorded = books("You recorded selling a sofa for 25,000") as BooksAction.Order
+        assertEquals("Sofa", recorded.item)
+        assertEquals(25_000, recorded.amount)
+        val spoken = books("I sold a sofa for 25000") as BooksAction.Order
+        assertEquals(25_000, spoken.amount)
+
+        val labour = books("labour needs 10 sheets of plywood") as BooksAction.PurchaseOrder
+        assertEquals("Labour", labour.requestedBy)
+        assertEquals("", labour.supplier)
+        assertEquals("Plywood 10 sheet", labour.lines)
+        val american = books("that labor needs 10 sheets of plywood") as BooksAction.PurchaseOrder
+        assertEquals("Plywood 10 sheet", american.lines)
+
+        val both = "You recorded selling a sofa for 25,000, and that labor needs 10 sheets of plywood."
+        val plan = planLocalSteps(both) { router.match(it) }
+        assertEquals(2, plan!!.size)
+        assertTrue(plan[0].command is LocalCommand.Books)
+        assertTrue(plan[1].command is LocalCommand.Books)
+        val order = (plan[0].command as LocalCommand.Books).action as BooksAction.Order
+        val request = (plan[1].command as LocalCommand.Books).action as BooksAction.PurchaseOrder
+        assertEquals(25_000, order.amount)
+        assertEquals("Plywood 10 sheet", request.lines)
+        assertNull(researchQuery(both))
+        assertNull(researchQuery("sold a sofa for 25000"))
+        assertNull(researchQuery("labour needs 10 sheets of plywood"))
     }
 
     @Test

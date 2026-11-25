@@ -63,7 +63,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kai.assistant.KaiApplication
 import com.kai.assistant.R
+import com.kai.assistant.data.KaiSettings
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.tools.AccessibilityTarget
 import com.kai.assistant.tools.ScreenReaderAccess
@@ -79,6 +81,7 @@ import com.kai.assistant.voice.VoiceSessionViewModel
 fun VoiceSessionScreen(
     onBack: () -> Unit,
     onOpenChat: () -> Unit,
+    wakeListenToken: Long = 0L,
     viewModel: VoiceSessionViewModel = viewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -93,6 +96,8 @@ fun VoiceSessionScreen(
     val screenshotRequest by viewModel.screenshotConsentRequest.collectAsStateWithLifecycle()
     val photoRequest by viewModel.photoPickRequest.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val kaiSettings by (context.applicationContext as KaiApplication)
+        .settingsRepository.settings.collectAsStateWithLifecycle(initialValue = KaiSettings())
 
     var talkAfterGrant by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -109,6 +114,20 @@ fun VoiceSessionScreen(
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) viewModel.onWakeScreenOpen(true) else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    LaunchedEffect(wakeListenToken) {
+        if (wakeListenToken == 0L) return@LaunchedEffect
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            viewModel.onBackgroundWake()
+        } else {
+            talkAfterGrant = true
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     DisposableEffect(Unit) {
@@ -270,7 +289,10 @@ fun VoiceSessionScreen(
             MicStatusChip(status = micStatus)
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = stringResource(R.string.wake_background_limit),
+                text = stringResource(
+                    if (kaiSettings.backgroundHeyKai) R.string.wake_background_on
+                    else R.string.wake_background_limit,
+                ),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

@@ -80,6 +80,28 @@ class KaiApiClientEnquiryTest {
     }
 
     @Test
+    fun researchPostsSessionIdWithTheQuery() = runBlocking {
+        val seen = AtomicReference<Pair<String, String>>()
+        val api = client { request ->
+            val buffer = Buffer()
+            request.body!!.writeTo(buffer)
+            seen.set(request.url.encodedPath to buffer.readUtf8())
+            json(
+                request,
+                200,
+                """{"answer":"Plywood is a sheet material.","sources":[{"title":"Wood","url":"https://example.com/wood"}]}""",
+            )
+        }
+        val result = api.research("price of plywood", "local-session")
+        assertTrue(result.ok)
+        assertEquals("/v1/research", seen.get().first)
+        val payload = JSONObject(seen.get().second)
+        assertEquals("local-session", payload.getString("session_id"))
+        assertEquals("price of plywood", payload.getString("query"))
+        assertEquals("Plywood is a sheet material.", result.answer)
+    }
+
+    @Test
     fun enquireMarksUnparseable502() = runBlocking {
         val api = client { request ->
             json(

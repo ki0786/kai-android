@@ -1,5 +1,6 @@
 package com.kai.assistant.books
 
+import com.kai.assistant.business.MaterialRequestParser
 import java.time.ZonedDateTime
 
 /**
@@ -21,6 +22,7 @@ object BooksUtterance {
         bill(text, now)?.let { return it }
         order(text)?.let { return it }
         labour(text, now)?.let { return it }
+        labourMaterial(text)?.let { return it }
         material(text)?.let { return it }
         receivable(text)?.let { return it }
         debt(text, now)?.let { return it }
@@ -32,6 +34,7 @@ object BooksUtterance {
     private fun prepare(raw: String): String = raw.lowercase()
         .replace("₹", " ")
         .replace(Regex("""\b(?:rs\.?|rupees?|inr)\b"""), " ")
+        .replace(Regex("""\blabor\b"""), "labour")
         .replace(",", "")
         .replace(Regex("""[?.!]+"""), " ")
         .replace(Regex("""\s+"""), " ")
@@ -132,6 +135,17 @@ object BooksUtterance {
     }
 
     private fun order(text: String): BooksAction? {
+        Regex(
+            """^(?:(?:you|i|we)\s+)?(?:recorded\s+)?(?:selling|sold)\s+(?:a|an|the)\s+(?<item>.+?)\s+for\s+$AMOUNT$ADVANCE$""",
+        ).matchEntire(text)?.let { match ->
+            val amount = amount(match) ?: return null
+            return BooksAction.Order(
+                customer = "",
+                item = titleParty(match.groups["item"]?.value.orEmpty()),
+                amount = amount,
+                advance = advance(match),
+            )
+        }
         Regex("""^sold\s+(?<customer>.+?)\s+(?:a|an|the)\s+(?<item>.+?)\s+for\s+$AMOUNT$ADVANCE$""")
             .matchEntire(text)
             ?.let { match ->
@@ -199,6 +213,23 @@ object BooksUtterance {
             )
         }
         return null
+    }
+
+    /**
+     * "labour needs 10 sheets of plywood" is a workshop material request, not a wage
+     * and not a web search. The supplier is filled in from stock when the books are updated.
+     */
+    private fun labourMaterial(text: String): BooksAction? {
+        val match = Regex(
+            """^(?:that\s+|the\s+)?labour\s+(?:needs|need|needed|requires|required|wants|wanted|asked\s+for)\s+(?<rest>.+)$""",
+        ).matchEntire(text) ?: return null
+        val lines = MaterialRequestParser.parse(match.groups["rest"]?.value.orEmpty())
+        if (lines.isEmpty()) return null
+        return BooksAction.PurchaseOrder(
+            supplier = "",
+            requestedBy = "Labour",
+            lines = MaterialRequestParser.describe(lines),
+        )
     }
 
     private fun material(text: String): BooksAction? {

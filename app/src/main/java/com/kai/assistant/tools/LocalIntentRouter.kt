@@ -621,7 +621,9 @@ class LocalIntentRouter {
     )
 
     private fun matchLaunchApp(text: String): LocalMatch? {
-        val match = Regex("""^(?:open|launch|start|open up)\s+(?:the\s+|my\s+)?(.+?)(?:\s+app(?:lication)?)?$""").find(text) ?: return null
+        // "okay open youtube" was reaching cloud chat, which only says it opened the app.
+        val spoken = text.replace(Regex("""^(?:okay|ok|sure|alright)[\s,]+"""), "")
+        val match = Regex("""^(?:open|launch|start|open up)\s+(?:the\s+|my\s+)?(.+?)(?:\s+app(?:lication)?)?$""").find(spoken) ?: return null
         val name = match.groupValues[1].trim()
         if (name.isBlank() || name.contains(" and ") || name.split(" ").size > 4) return null
         val blocked = setOf(
@@ -630,7 +632,8 @@ class LocalIntentRouter {
         )
         if (name in blocked) return null
         if (name.startsWith("wifi") || name.startsWith("wi-fi") || name.startsWith("bluetooth")) return null
-        return local(LocalCommand.LaunchAppByName(name), "Opening $name")
+        val spokenName = spokenLaunchName("", name)
+        return local(LocalCommand.LaunchAppByName(name), "Opening $spokenName")
     }
 
     private fun matchYouTube(text: String): LocalMatch? {

@@ -217,10 +217,14 @@ class KaiApiClient(
     }
 
     /**
-     * POST /v1/research. Sources are only those the backend returns.
+     * POST /v1/research. The backend ResearchRequest requires session_id;
+     * a body with only query is rejected with 422 before any search.
+     * Sources are only those the backend returns.
      */
-    suspend fun research(query: String): ResearchResult {
-        val payload = JSONObject().put("query", query)
+    suspend fun research(query: String, sessionId: String): ResearchResult {
+        val payload = JSONObject()
+            .put("session_id", sessionId)
+            .put("query", query)
         return withRediscovery({ ResearchResult(ok = false, answer = "", sources = emptyList(), code = null, offline = true) }) { base ->
             postResearch(base, payload)
         }

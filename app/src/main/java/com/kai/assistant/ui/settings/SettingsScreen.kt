@@ -60,6 +60,9 @@ import com.kai.assistant.tools.WhatsAppSendAccess
 import com.kai.assistant.tools.toast
 import com.kai.assistant.ui.components.MicStatus
 import com.kai.assistant.ui.components.MicStatusChip
+import com.kai.assistant.voice.wake.WakePresence
+import com.kai.assistant.voice.wake.WakeRuntime
+import com.kai.assistant.voice.wake.keywordsThreshold
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +109,7 @@ fun SettingsScreen(
     ) { calendarGranted = tools.calendarGranted() }
     val whatsAppSendOn = WhatsAppSendAccess.isEnabled(context)
     val screenReaderOn = ScreenReaderAccess.isEnabled(context)
+    val wakePresence by WakeRuntime.presence.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -128,9 +132,14 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SectionTitle("Privacy")
-            MicStatusChip(status = MicStatus.Off)
+            MicStatusChip(status = wakePresence.asSettingsMicStatus())
             Text(
-                text = "Hey KAI listens only on the voice screen. Android won't keep the microphone on in the background.",
+                text = if (settings.backgroundHeyKai) {
+                    "Background Hey KAI is on. It uses an on-device model. Microphone audio is not uploaded."
+                } else {
+                    "Background Hey KAI is off until you turn it on from the home screen. " +
+                        "It uses an on-device model. Microphone audio is not uploaded."
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -285,6 +294,22 @@ fun SettingsScreen(
                     scope.launch { settingsRepository.setSpeechRate(value) }
                 },
                 valueRange = 0.5f..2.0f,
+            )
+            Text(
+                text = "Hey KAI sensitivity: ${"%.2f".format(java.util.Locale.US, keywordsThreshold(settings.heyKaiSensitivity))} threshold",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = "Higher is easier to trigger. The wake word is spotted on this phone.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = settings.heyKaiSensitivity,
+                onValueChange = { value ->
+                    scope.launch { settingsRepository.setHeyKaiSensitivity(value) }
+                },
+                valueRange = 0f..1f,
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -449,6 +474,13 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+}
+
+private fun WakePresence.asSettingsMicStatus(): MicStatus = when (this) {
+    WakePresence.Off -> MicStatus.Off
+    WakePresence.Standby -> MicStatus.Standby
+    WakePresence.Listening -> MicStatus.Listening
+    WakePresence.Paused -> MicStatus.Paused
 }
 
 @Composable

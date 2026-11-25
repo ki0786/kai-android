@@ -66,6 +66,9 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            pickFirsts += setOf("lib/**/libc++_shared.so")
+        }
     }
 }
 
@@ -95,6 +98,9 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // On-device "Hey KAI" keyword spotting. The AAR is native code; audio is not uploaded.
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.12.18")
+    implementation("org.apache.commons:commons-compress:1.27.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

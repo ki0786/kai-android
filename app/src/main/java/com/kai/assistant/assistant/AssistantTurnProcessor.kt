@@ -713,7 +713,9 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun callResearch(query: String): TurnOutcome {
-        val result = withContext(Dispatchers.IO) { api.research(query) }
+        val result = withContext(Dispatchers.IO) {
+            api.research(query, SessionMessageStore.SESSION_ID)
+        }
         val empty = result.answer.isBlank() && result.sources.isEmpty()
         val reply = when {
             result.offline -> RESEARCH_OFFLINE

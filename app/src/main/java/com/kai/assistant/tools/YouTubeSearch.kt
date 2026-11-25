@@ -15,6 +15,28 @@ internal fun parseYouTubeSearch(raw: String): String? {
     return query
 }
 
+/**
+ * Name to speak after an app launch. YouTube is never spoken as its package name.
+ */
+internal fun spokenLaunchName(packageName: String, requestedName: String): String {
+    val requested = requestedName.trim()
+    if (packageName == "com.google.android.youtube" ||
+        requested.equals("youtube", ignoreCase = true) ||
+        requested.equals("yt", ignoreCase = true)
+    ) {
+        return "YouTube"
+    }
+    if (requested.isNotEmpty() && !requested.contains('.')) {
+        return requested.replaceFirstChar { char ->
+            if (char.isLowerCase()) char.titlecase(java.util.Locale.US) else char.toString()
+        }
+    }
+    val tail = packageName.substringAfterLast('.')
+    return tail.replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase(java.util.Locale.US) else char.toString()
+    }
+}
+
 internal fun youtubeResultsUrl(query: String): String {
     val encoded = URLEncoder.encode(query, Charsets.UTF_8).replace("+", "%20")
     return "https://www.youtube.com/results?search_query=$encoded"
