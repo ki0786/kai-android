@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.kai.assistant.data.SettingsRepository
+import com.kai.assistant.ui.books.BooksScreen
 import com.kai.assistant.ui.business.BusinessInfoScreen
 import com.kai.assistant.ui.business.EnquiryInboxScreen
 import com.kai.assistant.ui.chat.TextChatScreen
@@ -39,6 +40,7 @@ fun KaiApp(
                 onOpenChat = { navController.navigate(KaiDestination.Chat.route) },
                 onOpenSettings = { navController.navigate(KaiDestination.Settings.route) },
                 onOpenEnquiryInbox = { navController.navigate(KaiDestination.EnquiryInbox.route) },
+                onOpenBooks = { navController.navigate(KaiDestination.Books.route) },
             )
         }
         composable(KaiDestination.Voice.route) {
@@ -77,6 +79,9 @@ fun KaiApp(
         }
         composable(KaiDestination.BusinessInfo.route) {
             BusinessInfoScreen(onBack = { navController.popBackStack() })
+        }
+        composable(KaiDestination.Books.route) {
+            BooksScreen(onBack = { navController.popBackStack() })
         }
     }
 }

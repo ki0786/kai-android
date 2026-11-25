@@ -15,6 +15,8 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.provider.Settings
 import android.widget.Toast
+import com.kai.assistant.books.BooksReminders
+import com.kai.assistant.books.BooksStore
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -146,6 +148,13 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.ReadSchedule -> calendar.readSchedule(command.dayOffset)
         is LocalCommand.SaveNote -> saveNote(command)
         LocalCommand.DailyBriefing -> briefing.speak()
+        is LocalCommand.Books -> recordBooks(command)
+    }
+
+    private fun recordBooks(command: LocalCommand.Books): ToolResult {
+        val outcome = BooksStore.get(context).apply(command.action)
+        BooksReminders.sync(context, outcome)
+        return ToolResult.Ok(outcome.spoken)
     }
 
     private fun openSms(command: LocalCommand.SendSms): ToolResult {

@@ -1,5 +1,8 @@
 package com.kai.assistant.tools
 
+import com.kai.assistant.books.BooksAction
+import com.kai.assistant.books.BooksUtterance
+
 /**
  * Rule-based utterance → local phone command matcher.
  * Returns null when no phone action fits so the cloud path can handle the turn.
@@ -29,6 +32,7 @@ class LocalIntentRouter {
         matchScreen(text)?.let { return it }
         matchPhoto(text)?.let { return it }
         matchCalendar(spoken)?.let { return it }
+        matchBooks(text)?.let { return it }
         matchMemory(spoken)?.let { return it }
         matchMaps(text)?.let { return it }
         matchCamera(text)?.let { return it }
@@ -265,6 +269,12 @@ class LocalIntentRouter {
             CalendarRequest.Briefing -> "Daily briefing"
         }
         return local(command, label)
+    }
+
+    private fun matchBooks(text: String): LocalMatch? {
+        val action = BooksUtterance.parse(text) ?: return null
+        val label = if (action is BooksAction.Summary) "Checking the books" else "Updating the books"
+        return local(LocalCommand.Books(action), label)
     }
 
     private fun matchMemory(utterance: String): LocalMatch? {

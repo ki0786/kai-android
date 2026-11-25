@@ -61,7 +61,9 @@ private fun isPhoneFact(lower: String): Boolean =
             """|what time is it""" +
             """|today'?s date""" +
             """|what did i (?:say|tell)""" +
-            """|on my phone""",
+            """|on my phone""" +
+            """|\b(?:business books|my books|the books)\b""" +
+            """|\b(?:money in|money out|owes me|i owe)\b""",
     ).containsMatchIn(lower)
 
 private fun needsLiveFacts(lower: String): Boolean {

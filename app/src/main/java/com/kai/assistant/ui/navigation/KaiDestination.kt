@@ -7,4 +7,5 @@ sealed class KaiDestination(val route: String) {
     data object Settings : KaiDestination("settings")
     data object EnquiryInbox : KaiDestination("enquiry_inbox")
     data object BusinessInfo : KaiDestination("business_info")
+    data object Books : KaiDestination("books")
 }
