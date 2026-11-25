@@ -34,6 +34,80 @@ class WakePolicyTest {
     }
 
     @Test
+    fun voiceScreenNeedsOverlayFromAndroid10() {
+        assertTrue(voiceScreenAllowedFromBackground(sdkInt = 28, canDrawOverlays = false))
+        assertFalse(voiceScreenAllowedFromBackground(sdkInt = 29, canDrawOverlays = false))
+        assertFalse(voiceScreenAllowedFromBackground(sdkInt = 35, canDrawOverlays = false))
+        assertTrue(voiceScreenAllowedFromBackground(sdkInt = 35, canDrawOverlays = true))
+        assertEquals(0x10000000, VOICE_SCREEN_FLAGS and 0x10000000)
+        assertEquals(0x00020000, VOICE_SCREEN_FLAGS and 0x00020000)
+    }
+
+    @Test
+    fun vivoPopupIsSeparateFromTheOverlayGrant() {
+        assertEquals(null, vivoPopupGrant(null))
+        assertEquals(null, vivoPopupGrant(2))
+        assertEquals(true, vivoPopupGrant(0))
+        assertEquals(false, vivoPopupGrant(1))
+        assertFalse(
+            needsVoiceOverAppsGrant(
+                sdkInt = 35,
+                canDrawOverlays = true,
+                manufacturer = "Google",
+                vivoPopupMode = 1,
+            ),
+        )
+        assertTrue(
+            needsVoiceOverAppsGrant(
+                sdkInt = 35,
+                canDrawOverlays = true,
+                manufacturer = "vivo",
+                vivoPopupMode = 1,
+            ),
+        )
+        assertTrue(
+            needsVoiceOverAppsGrant(
+                sdkInt = 35,
+                canDrawOverlays = false,
+                manufacturer = "vivo",
+                vivoPopupMode = 0,
+            ),
+        )
+        assertFalse(
+            needsVoiceOverAppsGrant(
+                sdkInt = 35,
+                canDrawOverlays = true,
+                manufacturer = "vivo",
+                vivoPopupMode = 0,
+            ),
+        )
+        assertFalse(
+            needsVoiceOverAppsGrant(
+                sdkInt = 35,
+                canDrawOverlays = true,
+                manufacturer = "vivo",
+                vivoPopupMode = null,
+            ),
+        )
+        assertFalse(
+            needsVoiceOverAppsGrant(
+                sdkInt = 28,
+                canDrawOverlays = false,
+                manufacturer = "vivo",
+                vivoPopupMode = 0,
+            ),
+        )
+        assertTrue(
+            needsVoiceOverAppsGrant(
+                sdkInt = 28,
+                canDrawOverlays = false,
+                manufacturer = "vivo",
+                vivoPopupMode = 1,
+            ),
+        )
+    }
+
+    @Test
     fun disabledBootDoesNothing() {
         val started = booleanArrayOf(false)
         applyBootHandoff(

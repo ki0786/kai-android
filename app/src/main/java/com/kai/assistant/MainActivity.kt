@@ -1,7 +1,9 @@
 package com.kai.assistant
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +15,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.business.EnquiryStatusNotifier
 import com.kai.assistant.ui.KaiApp
 import com.kai.assistant.ui.theme.KaiTheme
+import com.kai.assistant.voice.wake.WakeNotifications
 import com.kai.assistant.voice.wake.WakeWordController
 
 class MainActivity : ComponentActivity() {
@@ -53,8 +56,26 @@ class MainActivity : ComponentActivity() {
     private fun consumeIntent(intent: Intent) {
         openEnquiryInbox = intent.getBooleanExtra(EnquiryStatusNotifier.EXTRA_OPEN_INBOX, false)
         val token = intent.getLongExtra(EXTRA_AUTO_LISTEN, 0L)
-        if (intent.getBooleanExtra(EXTRA_OPEN_VOICE, false) || token != 0L) {
+        val voice = intent.getBooleanExtra(EXTRA_OPEN_VOICE, false) || token != 0L
+        if (voice) {
             voiceLaunchToken = if (token != 0L) token else System.nanoTime()
+            showVoiceOverLockScreen()
+            WakeNotifications.cancelVoiceScreen(this)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+        }
+    }
+
+    private fun showVoiceOverLockScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+            )
         }
     }
 

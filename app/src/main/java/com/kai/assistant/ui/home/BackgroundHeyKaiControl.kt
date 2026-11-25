@@ -19,6 +19,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,10 +33,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kai.assistant.R
 import com.kai.assistant.data.KaiSettings
 import com.kai.assistant.data.SettingsRepository
+import com.kai.assistant.voice.wake.VoiceScreenLaunch
 import com.kai.assistant.voice.wake.WakeModelStatus
 import com.kai.assistant.voice.wake.WakeRuntime
 import com.kai.assistant.voice.wake.WakeWordController
@@ -62,13 +68,18 @@ fun BackgroundHeyKaiControl(
     }
 
     fun finishEnable() {
-        promptBatteryUnrestricted(context)
         scope.launch { settingsRepository.setBackgroundHeyKai(true) }
         if (WakeWordController.micGranted(context)) {
             WakeWordController.start(context)
             note = ""
         } else {
             note = "Microphone permission is required for Hey KAI."
+        }
+        if (VoiceScreenLaunch.needsGrant(context)) {
+            voiceOverAppsPrompted = true
+            VoiceScreenLaunch.openSettings(context)
+        } else {
+            promptBatteryUnrestricted(context)
         }
     }
 
@@ -106,6 +117,26 @@ fun BackgroundHeyKaiControl(
                 enableAfterPermission = false
                 finishEnable()
             }
+        }
+    }
+
+    val lifecycle = LocalLifecycleOwner.current
+    var grantMissing by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                grantMissing = VoiceScreenLaunch.needsGrant(context)
+            }
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        grantMissing = VoiceScreenLaunch.needsGrant(context)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(settings.backgroundHeyKai) {
+        if (!settings.backgroundHeyKai || voiceOverAppsPrompted) return@LaunchedEffect
+        if (VoiceScreenLaunch.needsGrant(context)) {
+            voiceOverAppsPrompted = true
+            VoiceScreenLaunch.openSettings(context)
         }
     }
 
@@ -158,6 +189,12 @@ fun BackgroundHeyKaiControl(
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
+    if (settings.backgroundHeyKai && grantMissing) {
+        TextButton(
+            onClick = { VoiceScreenLaunch.openSettings(context) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Allow KAI to open over other apps") }
+    }
     if (model is WakeModelStatus.Failed && settings.backgroundHeyKai) {
         TextButton(
             onClick = { WakeWordController.retry(context) },
@@ -166,6 +203,8 @@ fun BackgroundHeyKaiControl(
     }
     }
 }
+
+private var voiceOverAppsPrompted = false
 
 private fun promptBatteryUnrestricted(context: Context) {
     val power = context.getSystemService(PowerManager::class.java) ?: return

@@ -5,6 +5,51 @@ import java.util.Locale
 /** Android 15 (API 35) blocks microphone foreground services started from BOOT_COMPLETED. */
 internal const val ANDROID_15_API = 35
 
+/** Android 10 (API 29) blocks activity starts from a background service. */
+internal const val ANDROID_10_API = 29
+
+/**
+ * Flags that bring the existing KAI task forward from the wake service.
+ * [android.content.Intent.FLAG_ACTIVITY_NEW_TASK] is required from a service.
+ * The other three deliver the voice extras to the running screen and move it
+ * in front of whatever app is open.
+ */
+internal const val VOICE_SCREEN_FLAGS: Int =
+    0x10000000 or 0x04000000 or 0x20000000 or 0x00020000
+
+/**
+ * Android 10 and newer only let a background service start an activity when
+ * the user has allowed the app to draw over other apps. Older versions allow
+ * the start directly.
+ */
+internal fun voiceScreenAllowedFromBackground(sdkInt: Int, canDrawOverlays: Boolean): Boolean =
+    sdkInt < ANDROID_10_API || canDrawOverlays
+
+/**
+ * Vivo's "background pop-up" op (`checkOpNoThrow` 10021). `0` is allowed,
+ * `2` means the op does not apply on this phone, anything else is denied.
+ */
+internal fun vivoPopupGrant(opMode: Int?): Boolean? = when (opMode) {
+    null, 2 -> null
+    0 -> true
+    else -> false
+}
+
+/**
+ * True when Hey KAI still needs a grant before it can open the voice screen
+ * over another app. Vivo has a separate pop-up switch from the standard overlay.
+ */
+internal fun needsVoiceOverAppsGrant(
+    sdkInt: Int,
+    canDrawOverlays: Boolean,
+    manufacturer: String,
+    vivoPopupMode: Int?,
+): Boolean {
+    if (!voiceScreenAllowedFromBackground(sdkInt, canDrawOverlays)) return true
+    if (!manufacturer.equals("vivo", ignoreCase = true)) return false
+    return vivoPopupGrant(vivoPopupMode) == false
+}
+
 /**
  * Phrase sherpa returns for this keyword. It is one word on purpose.
  * EncodeKeywords splits the line on whitespace and looks up every word that

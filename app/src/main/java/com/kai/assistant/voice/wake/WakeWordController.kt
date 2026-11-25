@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import com.kai.assistant.MainActivity
 
 /** Starts and stops [WakeWordForegroundService]. Does not record audio itself. */
 internal object WakeWordController {
@@ -64,12 +63,7 @@ internal object WakeWordController {
     }
 
     fun openVoice(context: Context) {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra(MainActivity.EXTRA_OPEN_VOICE, true)
-            putExtra(MainActivity.EXTRA_AUTO_LISTEN, System.nanoTime())
-        }
-        context.startActivity(intent)
+        VoiceScreenLaunch.open(context)
     }
 
     fun postTapToStart(context: Context) {
