@@ -22,6 +22,8 @@ class LocalIntentRouter {
         matchBattery(text)?.let { return it }
         matchDateTime(text)?.let { return it }
         matchConnectivity(text)?.let { return it }
+        matchLatestNotification(text)?.let { return it }
+        matchPersonalControls(text)?.let { return it }
         matchSettings(text)?.let { return it }
         matchVolume(numeric)?.let { return it }
         matchTimer(numeric)?.let { return it }
@@ -39,7 +41,8 @@ class LocalIntentRouter {
         matchSms(text, spoken)?.let { return it }
         matchWhatsApp(text, spoken)?.let { return it }
         matchCall(text)?.let { return it }
-        matchYouTube(text)?.let { return it }
+        matchYouTube(spoken)?.let { return it }
+        matchMedia(text)?.let { return it }
         matchLaunchApp(text)?.let { return it }
         return null
     }
@@ -97,6 +100,55 @@ class LocalIntentRouter {
             """increase|decrease|reduce|raise|lower|change|set|adjust)\b""",
     )
 
+    private val brightnessUp = Regex(
+        """^(?:turn|crank|bump)\s+up\s+(?:the\s+)?(?:screen\s+)?brightness$""" +
+            """|^(?:turn|crank|bump)\s+(?:the\s+)?(?:screen\s+)?brightness\s+up$""" +
+            """|^brightness\s+up$""" +
+            """|^(?:increase|raise|boost)\s+(?:the\s+)?(?:screen\s+)?brightness$""" +
+            """|^make\s+(?:it|the\s+screen)\s+brighter$""" +
+            """|^brighter$""" +
+            """|^brighten(?:\s+(?:the\s+)?(?:screen|display))?$""",
+    )
+
+    private val brightnessDown = Regex(
+        """^(?:turn|crank)\s+down\s+(?:the\s+)?(?:screen\s+)?brightness$""" +
+            """|^(?:turn|crank)\s+(?:the\s+)?(?:screen\s+)?brightness\s+down$""" +
+            """|^brightness\s+down$""" +
+            """|^(?:decrease|lower|reduce)\s+(?:the\s+)?(?:screen\s+)?brightness$""" +
+            """|^dim\s+(?:the\s+)?(?:screen|brightness)$""" +
+            """|^make\s+(?:it|the\s+screen)\s+dimmer$""" +
+            """|^dimmer$""",
+    )
+
+    private val mediaPlay = Regex(
+        """^(?:play|resume|unpause)(?:\s+(?:the\s+|a\s+|some\s+)?(?:music|song|track|playback|media))?$""" +
+            """|^start\s+(?:the\s+)?(?:music|song|playback)$""",
+    )
+
+    private val mediaPause = Regex(
+        """^pause(?:\s+(?:the\s+|a\s+)?(?:music|song|track|playback|media))?$""" +
+            """|^stop\s+(?:the\s+)?(?:music|song|track|playback|media)$""",
+    )
+
+    private val mediaNext = Regex(
+        """^(?:next|skip)(?:\s+(?:this\s+|the\s+)?(?:song|track|music))?$""",
+    )
+
+    private val mediaPrevious = Regex(
+        """^(?:previous|prev)(?:\s+(?:the\s+)?(?:song|track))?$""" +
+            """|^(?:last|previous)\s+(?:song|track)$""" +
+            """|^go\s+back\s+(?:a\s+)?(?:song|track)$""",
+    )
+
+    private val latestNotification = Regex(
+        """^what(?:'s| is|s)\s+(?:my\s+|the\s+)?(?:latest|last|newest)\s+notification$""" +
+            """|^(?:read|tell me|say)(?:\s+me)?\s+(?:my\s+)?(?:latest|last|newest)\s+notification$""" +
+            """|^read\s+(?:the\s+)?(?:latest|last|newest)\s+notification$""" +
+            """|^(?:read|what(?:'s| is|s))\s+(?:my\s+)?notifications$""" +
+            """|^any\s+new\s+notifications?$""" +
+            """|^(?:latest|last|newest)\s+notification$""",
+    )
+
     private fun matchSettings(text: String): LocalMatch? {
         if (Regex("""\b(wi-?fi|wifi)\b""").containsMatchIn(text) && toggleWords.containsMatchIn(text)) {
             return local(LocalCommand.OpenWifiSettings, "Opening Wi‑Fi settings")
@@ -147,9 +199,9 @@ class LocalIntentRouter {
                 local(LocalCommand.AdjustVolume(2), "Turning volume up")
             Regex("""^(?:turn)\s+(?:it|the\s+volume|the\s+sound|volume)\s+down$|^turn\s+down\s+(?:the\s+)?(?:volume|sound)$|^(?:the\s+)?volume\s+down$|^quieter$|^(?:decrease|lower|reduce)\s+(?:the\s+)?(?:volume|sound)$""").matches(text) ->
                 local(LocalCommand.AdjustVolume(-2), "Turning volume down")
-            Regex("""^mute$|^mute\s+(?:the\s+)?(?:volume|sound|phone|media)$""").matches(text) ->
+            Regex("""^mute$|^mute\s+(?:the\s+)?(?:volume|sound|phone|media|music)$""").matches(text) ->
                 local(LocalCommand.SetVolume(0), "Muting volume")
-            Regex("""^unmute(?:\s+(?:the\s+)?(?:volume|sound|phone|media))?$""").matches(text) ->
+            Regex("""^unmute(?:\s+(?:the\s+)?(?:volume|sound|phone|media|music))?$""").matches(text) ->
                 local(LocalCommand.SetVolume(50), "Unmuting")
             else -> null
         }
@@ -619,6 +671,94 @@ class LocalIntentRouter {
         val target: String,
         val confirmed: Boolean,
     )
+
+    private fun matchLatestNotification(text: String): LocalMatch? {
+        if (text.contains(" and ")) return null
+        if (!latestNotification.matches(text)) return null
+        return local(LocalCommand.ReadLatestNotification, "Reading the latest notification")
+    }
+
+    private fun matchPersonalControls(text: String): LocalMatch? {
+        if (text.contains(" and ")) return null
+        matchBrightness(text)?.let { return it }
+        matchDoNotDisturb(text)?.let { return it }
+        matchRadio(text)?.let { return it }
+        return null
+    }
+
+    private fun matchBrightness(text: String): LocalMatch? {
+        if (isControlQuestion(text)) return null
+        if (Regex("""\b(?:settings|dark\s+mode|display\s+settings)\b""").containsMatchIn(text)) return null
+        return when {
+            brightnessUp.matches(text) -> local(LocalCommand.AdjustBrightness(true), "Turning brightness up")
+            brightnessDown.matches(text) -> local(LocalCommand.AdjustBrightness(false), "Turning brightness down")
+            else -> null
+        }
+    }
+
+    private fun matchDoNotDisturb(text: String): LocalMatch? {
+        if (isControlQuestion(text)) return null
+        if (!Regex("""\b(?:do\s+not\s+disturb|dnd)\b""").containsMatchIn(text)) return null
+        if (Regex("""\bsettings\b""").containsMatchIn(text)) return null
+        if (Regex("""^(?:open|show|launch)\b""").containsMatchIn(text)) return null
+        val enabled = radioEnabled(text) ?: return null
+        return local(
+            LocalCommand.SetDoNotDisturb(enabled),
+            if (enabled) "Turning Do Not Disturb on" else "Turning Do Not Disturb off",
+        )
+    }
+
+    private fun matchRadio(text: String): LocalMatch? {
+        if (isControlQuestion(text)) return null
+        val wifi = Regex("""\b(?:wi-?fi|wifi)\b""").containsMatchIn(text)
+        val bluetooth = Regex("""\bbluetooth\b""").containsMatchIn(text)
+        if (wifi == bluetooth) return null
+        if (Regex("""\b(?:settings|panel)\b""").containsMatchIn(text)) return null
+        if (Regex("""^(?:open|show|launch)\b""").containsMatchIn(text)) return null
+        val enabled = radioEnabled(text) ?: return null
+        return if (wifi) {
+            local(LocalCommand.SetWifi(enabled), if (enabled) "Turning Wi-Fi on" else "Turning Wi-Fi off")
+        } else {
+            local(
+                LocalCommand.SetBluetooth(enabled),
+                if (enabled) "Turning Bluetooth on" else "Turning Bluetooth off",
+            )
+        }
+    }
+
+    private fun radioEnabled(text: String): Boolean? {
+        val off = Regex("""\b(?:off|disable|disconnect)\b""").containsMatchIn(text)
+        val on = Regex("""\b(?:on|enable|connect)\b""").containsMatchIn(text)
+        return when {
+            off && !on -> false
+            on && !off -> true
+            else -> null
+        }
+    }
+
+    private fun isControlQuestion(text: String): Boolean =
+        Regex(
+            """^(?:what|what's|whats|how|why|who|when|where|which|is|are|do|does|did|can|could|should|would)\b""",
+        ).containsMatchIn(text)
+
+    private fun matchMedia(text: String): LocalMatch? {
+        if (text.contains(" and ")) return null
+        if (isControlQuestion(text)) return null
+        val action = when {
+            mediaPlay.matches(text) -> MediaAction.Play
+            mediaPause.matches(text) -> MediaAction.Pause
+            mediaNext.matches(text) -> MediaAction.Next
+            mediaPrevious.matches(text) -> MediaAction.Previous
+            else -> return null
+        }
+        val label = when (action) {
+            MediaAction.Play -> "Playing"
+            MediaAction.Pause -> "Pausing"
+            MediaAction.Next -> "Next track"
+            MediaAction.Previous -> "Previous track"
+        }
+        return local(LocalCommand.MediaControl(action), label)
+    }
 
     private fun matchLaunchApp(text: String): LocalMatch? {
         // "okay open youtube" was reaching cloud chat, which only says it opened the app.

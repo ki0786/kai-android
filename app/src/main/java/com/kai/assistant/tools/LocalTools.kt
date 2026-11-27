@@ -55,6 +55,11 @@ class LocalToolRouter(private val context: Context) {
     private val alarms = AlarmTimerTool(context)
     private val settings = OpenSettingsTool(context)
     private val volume = VolumeTool(context)
+    private val radios = RadioPanelTool(context)
+    private val doNotDisturb = DoNotDisturbTool(context)
+    private val brightness = BrightnessTool(context)
+    private val media = MediaControlTool(context)
+    private val notifications = LatestNotificationTool(context)
     private val deviceInfo = DeviceInfoTool(context)
     private val calls = CallContactTool(context)
     private val whatsApp = WhatsAppTool(context)
@@ -103,6 +108,12 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.SearchYouTube -> launcher.searchYouTube(command.query)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
+        is LocalCommand.SetDoNotDisturb -> doNotDisturb.setEnabled(command.enabled)
+        is LocalCommand.AdjustBrightness -> brightness.adjust(command.up)
+        is LocalCommand.SetWifi -> radios.wifi(command.enabled)
+        is LocalCommand.SetBluetooth -> radios.bluetooth(command.enabled)
+        is LocalCommand.MediaControl -> media.control(command.action)
+        LocalCommand.ReadLatestNotification -> notifications.read()
         is LocalCommand.SetAlarm -> alarms.setAlarm(
             command.hour,
             command.minute,
@@ -407,7 +418,8 @@ class LaunchAppTool(private val context: Context) {
     }
 
     fun searchYouTube(query: String): ToolResult {
-        val uri = Uri.parse(youtubeResultsUrl(query))
+        val video = youtubeVideoId(query) != null
+        val uri = Uri.parse(youtubeOpenUrl(query))
         val youtube = Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage(YOUTUBE_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -419,7 +431,9 @@ class LaunchAppTool(private val context: Context) {
             } else {
                 startInFront(view)
             }
-            ToolResult.Ok("Searching YouTube for $query.")
+            ToolResult.Ok(
+                if (video) "Opening that video on YouTube." else "Searching YouTube for $query.",
+            )
         }.getOrElse {
             ToolResult.Error("I couldn't open YouTube.")
         }
@@ -582,7 +596,11 @@ class OpenSettingsTool(private val context: Context) {
             SettingsSection.Sound -> Settings.ACTION_SOUND_SETTINGS
             SettingsSection.Battery -> Settings.ACTION_BATTERY_SAVER_SETTINGS
         }
-        val note = if (section == SettingsSection.Main) "" else "Android doesn't let apps change this, so tap the switch."
+        val note = when (section) {
+            SettingsSection.Main -> ""
+            SettingsSection.Hotspot -> HOTSPOT_BLOCKED
+            else -> "Android doesn't let apps change this, so tap the switch."
+        }
         val opened = open(action, section.label, note)
         if (opened !is ToolResult.Error || section == SettingsSection.Main) return opened
         return open(Settings.ACTION_SETTINGS, "settings", "I couldn't open ${section.label} directly.")

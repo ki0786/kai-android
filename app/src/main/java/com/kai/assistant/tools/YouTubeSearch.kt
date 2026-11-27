@@ -7,11 +7,10 @@ internal fun parseYouTubeSearch(raw: String): String? {
         .replace(Regex("[?.!,]+$"), "")
         .replace(Regex("""\s+"""), " ")
         .trim()
-        .lowercase()
     if (text.isBlank()) return null
     val match = youtubeSearch.find(text) ?: return null
     val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-    if (query.length < 1 || query == "youtube") return null
+    if (query.length < 1 || query.equals("youtube", ignoreCase = true)) return null
     return query
 }
 
@@ -42,10 +41,26 @@ internal fun youtubeResultsUrl(query: String): String {
     return "https://www.youtube.com/results?search_query=$encoded"
 }
 
+/** A YouTube link opens that video. Anything else opens search results. */
+internal fun youtubeOpenUrl(query: String): String {
+    val id = youtubeVideoId(query)
+    return if (id != null) "https://www.youtube.com/watch?v=$id" else youtubeResultsUrl(query)
+}
+
+internal fun youtubeVideoId(query: String): String? {
+    val match = youtubeVideoUrl.find(query.trim()) ?: return null
+    return match.groupValues[1].ifBlank { null }
+}
+
+private val youtubeVideoUrl = Regex(
+    """(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|embed/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})""",
+)
+
 private val youtubeSearch = Regex(
     """^(?:please\s+)?open\s+youtube\s+and\s+(?:play|watch|search(?:\s+for)?)\s+(.+)$""" +
         """|^(?:please\s+)?(?:play|watch)\s+(.+?)\s+on\s+youtube$""" +
         """|^(?:please\s+)?(?:search|look up|lookup)\s+(?:for\s+)?(.+?)\s+on\s+youtube$""" +
         """|^(?:please\s+)?(?:search|look up|lookup)\s+youtube\s+for\s+(.+)$""" +
         """|^(?:please\s+)?youtube\s+search(?:\s+for)?\s+(.+)$""",
+    RegexOption.IGNORE_CASE,
 )

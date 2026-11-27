@@ -4,6 +4,7 @@ import com.kai.assistant.BuildConfig
 import com.kai.assistant.data.ChatMessage
 import com.kai.assistant.data.MessageRole
 import com.kai.assistant.tools.ResearchSource
+import com.kai.assistant.tools.healthUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -92,9 +93,29 @@ class KaiApiClient(
         val unparseable: Boolean = false,
     )
 
+    /**
+     * GET {baseUrl}/health with a short timeout. [baseUrl] is the address already
+     * in use (the settings field), never a hardcoded host. Any failure is false.
+     */
+    fun pingHealth(): Boolean {
+        val url = runCatching { healthUrl(root) }.getOrNull() ?: return false
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return false
+        val short = client.newBuilder()
+            .connectTimeout(HEALTH_PING_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(HEALTH_PING_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(HEALTH_PING_MS, TimeUnit.MILLISECONDS)
+            .callTimeout(HEALTH_PING_MS, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+        return runCatching {
+            val request = Request.Builder().url(url).get().build()
+            short.newCall(request).execute().use { response -> response.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     fun health(): HealthResult {
         val request = Request.Builder()
-            .url("$root/health")
+            .url(healthUrl(root))
             .get()
             .build()
         return runCatching {
@@ -359,6 +380,8 @@ class KaiApiClient(
                 rediscover = { failed -> locator.rediscover(failed) },
             )
         }
+
+        private const val HEALTH_PING_MS = 1_500L
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
 

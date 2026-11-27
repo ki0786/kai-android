@@ -7,6 +7,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.kai.assistant.api.KaiApiClient
 import com.kai.assistant.books.BooksStore
+import com.kai.assistant.tools.NoticeLine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,13 +50,20 @@ class WhatsAppBusinessNotificationListenerService : NotificationListenerService(
     }
 
     override fun onListenerConnected() {
+        instance = this
         super.onListenerConnected()
         EnquiryStatusNotifier.ensureChannels(this)
         val on = AutoReplySettings.get(this).isEnabled()
         EnquiryStatusNotifier.updateListeningIndicator(this, on)
     }
 
+    override fun onListenerDisconnected() {
+        if (instance === this) instance = null
+        super.onListenerDisconnected()
+    }
+
     override fun onDestroy() {
+        if (instance === this) instance = null
         scope.cancel()
         pending.values.forEach { main.removeCallbacks(it.runnable) }
         pending.clear()
@@ -262,5 +270,35 @@ class WhatsAppBusinessNotificationListenerService : NotificationListenerService(
 
     companion object {
         private const val DEBOUNCE_MS = 2_500L
+
+        @Volatile
+        private var instance: WhatsAppBusinessNotificationListenerService? = null
+
+        /**
+         * Active notifications, only when this listener is already connected.
+         * Null when it is not. Does not change which WhatsApp Business chats are answered.
+         */
+        internal fun postedNotices(): List<NoticeLine>? {
+            val service = instance ?: return null
+            val active = runCatching { service.activeNotifications?.toList().orEmpty() }.getOrNull()
+                ?: return null
+            return active.map { sbn ->
+                val notification = sbn.notification
+                val extras = notification?.extras
+                val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+                    ?: extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                    ?: ""
+                val summary = notification != null &&
+                    (notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0
+                NoticeLine(
+                    packageName = sbn.packageName,
+                    title = title,
+                    text = text,
+                    postedAtMs = sbn.postTime,
+                    groupSummary = summary,
+                )
+            }
+        }
     }
 }
