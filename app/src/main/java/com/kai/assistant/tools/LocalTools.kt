@@ -17,6 +17,10 @@ import android.os.BatteryManager
 import android.provider.Settings
 import android.widget.Toast
 import com.kai.assistant.books.BooksReminders
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import com.kai.assistant.books.BooksStore
 import java.lang.ref.WeakReference
 import java.text.DateFormat
@@ -108,6 +112,7 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.SearchYouTube -> launcher.searchYouTube(command.query)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
+        LocalCommand.SilencePhone -> volume.silencePhone()
         is LocalCommand.SetDoNotDisturb -> doNotDisturb.setEnabled(command.enabled)
         is LocalCommand.AdjustBrightness -> brightness.adjust(command.up)
         is LocalCommand.SetWifi -> radios.wifi(command.enabled)
@@ -418,8 +423,9 @@ class LaunchAppTool(private val context: Context) {
     }
 
     fun searchYouTube(query: String): ToolResult {
-        val video = youtubeVideoId(query) != null
-        val uri = Uri.parse(youtubeOpenUrl(query))
+        val videoId = youtubeVideoId(query) ?: fetchFirstVideoId(query)
+        val playing = videoId != null
+        val uri = Uri.parse(if (videoId != null) youtubeWatchUrl(videoId) else youtubeResultsUrl(query))
         val youtube = Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage(YOUTUBE_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -432,30 +438,64 @@ class LaunchAppTool(private val context: Context) {
                 startInFront(view)
             }
             ToolResult.Ok(
-                if (video) "Opening that video on YouTube." else "Searching YouTube for $query.",
+                if (playing) "Playing that on YouTube." else "I couldn't start a video, so I opened the YouTube search.",
             )
         }.getOrElse {
             ToolResult.Error("I couldn't open YouTube.")
         }
     }
 
+    private fun fetchFirstVideoId(query: String): String? {
+        val client = youtubeClient
+        val innertube = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+            .header("User-Agent", "com.google.android.youtube/19.17.34 (Linux; U; Android 16) gzip")
+            .post(youTubeInnertubeBody(query).toRequestBody("application/json".toMediaType()))
+            .build()
+        val fromApi = runCatching {
+            client.newCall(innertube).execute().use { response ->
+                if (!response.isSuccessful) null else firstYouTubeVideoId(response.body?.string().orEmpty())
+            }
+        }.getOrNull()
+        if (fromApi != null) return fromApi
+        val page = Request.Builder()
+            .url(youtubeResultsUrl(query))
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            )
+            .build()
+        return runCatching {
+            client.newCall(page).execute().use { response ->
+                if (!response.isSuccessful) null else firstYouTubeVideoId(response.body?.string().orEmpty())
+            }
+        }.getOrNull()
+    }
+
     private fun startInFront(intent: Intent) {
         // startActivity on the application context can return without the system
         // sending an intent (no wm_new_intent) while this method still said it
         // launched. The resumed activity is the call that actually sends it.
-        // When an intent is sent, YouTube does come to the front.
+        // When Hey KAI stays in the background there is no resumed activity, so
+        // the overlay path starts the target app and leaves KAI where it was.
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
         )
         val activity = ForegroundActivity.get()
-            ?: throw IllegalStateException("I couldn't open that app.")
-        activity.startActivity(intent)
+        if (activity != null) {
+            activity.startActivity(intent)
+            return
+        }
+        BackgroundActivityStart.start(context, intent)
     }
 
     private companion object {
         const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+        val youtubeClient: OkHttpClient = OkHttpClient.Builder()
+            .callTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
     }
 }
 
@@ -630,34 +670,106 @@ class VolumeTool(private val context: Context) {
         get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     fun setPercent(percent: Int): ToolResult {
-        val clamped = percent.coerceIn(0, 100)
-        return runCatching {
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val index = ((clamped / 100f) * max).toInt().coerceIn(0, max)
-            audio.setStreamVolume(AudioManager.STREAM_MUSIC, index, AudioManager.FLAG_SHOW_UI)
-            ToolResult.Ok("Volume set to $clamped%.")
-        }.getOrElse { ToolResult.Error(it.message ?: "Could not set volume.") }
+        val (min, max) = range()
+        val target = indexForPercent(percent, min, max)
+        return apply(target, min, max)
     }
 
     fun adjustSteps(deltaSteps: Int): ToolResult {
+        val (min, max) = range()
+        val current = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val target = steppedVolumeIndex(current, deltaSteps, min, max)
+        return apply(target, min, max)
+    }
+
+    /** Ringer silent. "Silent my phone" is the phone, not a web question. */
+    fun silencePhone(): ToolResult {
+        val stream = AudioManager.STREAM_RING
+        runCatching { audio.ringerMode = AudioManager.RINGER_MODE_SILENT }
+        runCatching { audio.setStreamVolume(stream, 0, 0) }
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0) }
+        writeAudioSystem(stream, 0)
+        val silent = audio.ringerMode == AudioManager.RINGER_MODE_SILENT ||
+            audio.getStreamVolume(stream) == 0
+        return if (silent) ToolResult.Ok(PHONE_SILENT) else ToolResult.Error("I couldn't silence the phone.")
+    }
+
+    private fun apply(target: Int, min: Int, max: Int): ToolResult {
         return runCatching {
-            val direction = when {
-                deltaSteps > 0 -> AudioManager.ADJUST_RAISE
-                deltaSteps < 0 -> AudioManager.ADJUST_LOWER
-                else -> return ToolResult.Ok("Volume unchanged.")
+            val stream = AudioManager.STREAM_MUSIC
+            // Flags of 0 write the stream. FLAG_SHOW_UI is ignored on this vivo,
+            // so a later read still reports the old percent.
+            audio.setStreamVolume(stream, target, 0)
+            if (readIndex(stream) != target) {
+                audio.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
             }
-            repeat(kotlin.math.abs(deltaSteps)) {
-                audio.adjustStreamVolume(
-                    AudioManager.STREAM_MUSIC,
-                    direction,
-                    AudioManager.FLAG_SHOW_UI,
-                )
-            }
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val current = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val percent = (current * 100) / max
-            ToolResult.Ok("Volume now about $percent%.")
-        }.getOrElse { ToolResult.Error(it.message ?: "Could not adjust volume.") }
+            if (readIndex(stream) != target) writeAudioSystem(stream, target)
+            if (readIndex(stream) != target) stepUntil(stream, target)
+            val now = readIndex(stream).coerceIn(min, max)
+            ToolResult.Ok(volumeSpoken(percentForIndex(now, min, max)))
+        }.getOrElse { ToolResult.Error(it.message ?: "Could not set volume.") }
+    }
+
+    private fun range(): Pair<Int, Int> {
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val min = if (Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(AudioManager.STREAM_MUSIC) else 0
+        return min.coerceAtMost(max) to max
+    }
+
+    private fun readIndex(stream: Int): Int {
+        val manager = audio.getStreamVolume(stream)
+        val speaker = audioSystemIndex(stream, DEVICE_OUT_SPEAKER)
+        return when {
+            speaker == null -> manager
+            speaker == manager -> manager
+            else -> speaker
+        }
+    }
+
+    private fun stepUntil(stream: Int, target: Int) {
+        var guard = 0
+        while (guard < 40) {
+            val now = readIndex(stream)
+            if (now == target) return
+            val direction = if (target > now) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+            audio.adjustStreamVolume(stream, direction, 0)
+            val next = readIndex(stream)
+            if (next == now) return
+            guard++
+        }
+    }
+
+    private fun writeAudioSystem(stream: Int, index: Int) {
+        val method = audioSystemMethod("setStreamVolumeIndex", 3) ?: return
+        for (device in OUTPUT_DEVICES) {
+            runCatching { method.invoke(null, stream, index, device) }
+        }
+    }
+
+    private fun audioSystemIndex(stream: Int, device: Int): Int? {
+        val method = audioSystemMethod("getStreamVolumeIndex", 2) ?: return null
+        val value = runCatching { method.invoke(null, stream, device) }.getOrNull() ?: return null
+        return value as? Int
+    }
+
+    private fun audioSystemMethod(name: String, arity: Int): java.lang.reflect.Method? {
+        return runCatching {
+            val type = Int::class.javaPrimitiveType ?: return null
+            val params = Array(arity) { type }
+            Class.forName("android.media.AudioSystem").getMethod(name, *params)
+        }.getOrNull()
+    }
+
+    private companion object {
+        const val DEVICE_OUT_SPEAKER = 0x2
+        val OUTPUT_DEVICES = intArrayOf(
+            0x2,
+            0x1,
+            0x4,
+            0x8,
+            0x80,
+            0x40000000,
+        )
     }
 }
 

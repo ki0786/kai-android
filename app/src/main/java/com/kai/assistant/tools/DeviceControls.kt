@@ -47,18 +47,83 @@ internal data class NoticeLine(
 internal fun healthUrl(baseUrl: String): String = "${baseUrl.trim().trimEnd('/')}/health"
 
 /**
- * Android 10 and later, for an app that targets 29 or later, will not let the
- * app switch Wi-Fi. Bluetooth enable and disable fail for an app that targets
- * Android 13 or later, and there is no Bluetooth quick-settings panel intent.
- * This app targets 35, so Wi-Fi opens the system panel and Bluetooth opens
- * Bluetooth settings. Neither call is the blocked toggle API.
+ * The public Wi-Fi and Bluetooth toggles are blocked for an app that targets
+ * this SDK. The phone still switches them through the radio service when the
+ * ROM allows it, and otherwise through the quick-settings tile, which is
+ * dismissed so the current app stays on screen.
  */
 internal fun radioUsesPanel(sdkInt: Int): Boolean = sdkInt >= 29
+
+internal fun radioSpoken(label: String, enabled: Boolean): String =
+    if (enabled) "$label is on." else "$label is off."
+
+internal fun radioFailed(label: String, enabled: Boolean): String =
+    "I couldn't turn $label ${if (enabled) "on" else "off"}."
 
 internal fun blockedRadioSpeech(label: String, enabled: Boolean, usesPanel: Boolean): String {
     val state = if (enabled) "on" else "off"
     val where = if (usesPanel) "panel" else "settings screen"
     return "Android won't let an app turn $label $state. I opened the $label $where so you can tap it."
+}
+
+/** Music-stream index for a spoken percent. 100 is the stream maximum. */
+internal fun indexForPercent(percent: Int, min: Int, max: Int): Int {
+    val low = min.coerceAtMost(max)
+    val high = max.coerceAtLeast(low)
+    val clamped = percent.coerceIn(0, 100)
+    if (clamped <= 0) return low
+    if (clamped >= 100) return high
+    val span = high - low
+    return (low + (clamped * span) / 100).coerceIn(low, high)
+}
+
+/** What to say after a volume change. This is the level the stream reports. */
+internal fun percentForIndex(index: Int, min: Int, max: Int): Int {
+    val low = min.coerceAtMost(max)
+    val high = max.coerceAtLeast(low)
+    val span = (high - low).coerceAtLeast(1)
+    val clamped = index.coerceIn(low, high)
+    if (clamped <= low) return 0
+    if (clamped >= high) return 100
+    return ((clamped - low) * 100) / span
+}
+
+internal fun steppedVolumeIndex(current: Int, deltaSteps: Int, min: Int, max: Int): Int {
+    val low = min.coerceAtMost(max)
+    val high = max.coerceAtLeast(low)
+    return (current + deltaSteps).coerceIn(low, high)
+}
+
+internal fun volumeSpoken(percent: Int): String = "Volume is ${percent.coerceIn(0, 100)}%."
+
+internal const val PHONE_SILENT = "Phone is silent."
+
+/**
+ * Quick-settings tile decision. [Already] means the tile already matches,
+ * so it must not be tapped. [Click] changes it. [Ignore] is a different tile.
+ */
+internal enum class QuickSettingAction { Ignore, Already, Click }
+
+internal fun quickSettingAction(label: String, names: List<String>, wantOn: Boolean): QuickSettingAction {
+    val text = label.lowercase()
+    if (names.none { name -> text.contains(name) }) return QuickSettingAction.Ignore
+    val on = quickSettingIsOn(text)
+    return when {
+        on == null -> QuickSettingAction.Click
+        on == wantOn -> QuickSettingAction.Already
+        else -> QuickSettingAction.Click
+    }
+}
+
+internal fun quickSettingIsOn(label: String): Boolean? {
+    val text = label.lowercase()
+    val off = Regex("""\b(?:off|disabled|disconnected)\b""").containsMatchIn(text)
+    val on = Regex("""\b(?:on|enabled|connected)\b""").containsMatchIn(text)
+    return when {
+        off && !on -> false
+        on && !off -> true
+        else -> null
+    }
 }
 
 internal fun dndSpoken(enabled: Boolean): String =

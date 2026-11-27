@@ -26,6 +26,11 @@ class PersonalControlsPhraseTest {
         assertEquals(LocalCommand.AdjustVolume(-2), command("volume down"))
         assertEquals(LocalCommand.SetVolume(0), command("mute"))
         assertEquals(LocalCommand.SetVolume(0), command("mute the music"))
+        assertEquals(LocalCommand.SilencePhone, command("silent my phone"))
+        assertEquals(LocalCommand.SilencePhone, command("silence my phone"))
+        assertEquals(LocalCommand.SilencePhone, command("mute my phone"))
+        assertEquals(LocalCommand.SilencePhone, command("put my phone on silent"))
+        assertEquals(LocalCommand.SilencePhone, command("turn on silent mode"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("brightness up"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("increase brightness"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("turn up the brightness"))
@@ -80,6 +85,11 @@ class PersonalControlsPhraseTest {
         assertEquals(LocalCommand.LaunchAppByName("youtube"), command("okay open youtube"))
         val search = command("play believer on youtube") as LocalCommand.SearchYouTube
         assertEquals("believer", search.query)
+        assertEquals(LocalCommand.SearchYouTube("a song"), command("play a song on youtube"))
+        assertEquals(
+            "dQw4w9WgXcQ",
+            firstYouTubeVideoId("""{"videoRenderer":{"videoId":"dQw4w9WgXcQ","title":"x"}}"""),
+        )
         assertEquals(
             "https://www.youtube.com/results?search_query=believer",
             youtubeOpenUrl(search.query),
@@ -117,6 +127,8 @@ class PersonalControlsPhraseTest {
             "turn on do not disturb",
             "volume down",
             "mute",
+            "silent my phone",
+            "mute my phone",
             "brightness up",
             "turn off wifi",
             "bluetooth on",
@@ -146,6 +158,19 @@ class PersonalControlsPhraseTest {
         assertEquals("http://10.0.0.8:8000/health", healthUrl(" http://10.0.0.8:8000 "))
         assertFalse(healthUrl("http://10.0.0.8:8000").contains("localhost"))
 
+        assertEquals("Bluetooth is on.", radioSpoken("Bluetooth", true))
+        assertEquals("Wi-Fi is off.", radioSpoken("Wi-Fi", false))
+        assertEquals("I couldn't turn Bluetooth on.", radioFailed("Bluetooth", true))
+        assertEquals(15, indexForPercent(100, 0, 15))
+        assertEquals(0, indexForPercent(0, 0, 15))
+        assertEquals(7, indexForPercent(53, 0, 15))
+        assertEquals(53, percentForIndex(8, 0, 15))
+        assertEquals(10, steppedVolumeIndex(8, 2, 0, 15))
+        assertEquals(66, percentForIndex(10, 0, 15))
+        assertEquals("Volume is 100%.", volumeSpoken(100))
+        assertEquals(QuickSettingAction.Click, quickSettingAction("Bluetooth, Off", listOf("bluetooth"), true))
+        assertEquals(QuickSettingAction.Already, quickSettingAction("Bluetooth, On", listOf("bluetooth"), true))
+        assertEquals(QuickSettingAction.Ignore, quickSettingAction("Wi-Fi, Off", listOf("bluetooth"), true))
         assertEquals("Do Not Disturb is on.", dndSpoken(true))
         assertEquals("Do Not Disturb is off.", dndSpoken(false))
         assertFalse(radioUsesPanel(28))

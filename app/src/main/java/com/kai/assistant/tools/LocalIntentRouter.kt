@@ -24,6 +24,7 @@ class LocalIntentRouter {
         matchConnectivity(text)?.let { return it }
         matchLatestNotification(text)?.let { return it }
         matchPersonalControls(text)?.let { return it }
+        matchSilence(text)?.let { return it }
         matchSettings(text)?.let { return it }
         matchVolume(numeric)?.let { return it }
         matchTimer(numeric)?.let { return it }
@@ -140,6 +141,13 @@ class LocalIntentRouter {
             """|^go\s+back\s+(?:a\s+)?(?:song|track)$""",
     )
 
+    private val silencePhone = Regex(
+        """^(?:please\s+)?(?:silent|silence|mute)(?:\s+(?:my|the))?\s+phone$""" +
+            """|^(?:please\s+)?(?:put|set|make|turn)(?:\s+(?:my|the))?\s+phone(?:\s+on)?\s+silent(?:\s+mode)?$""" +
+            """|^(?:please\s+)?(?:turn\s+on\s+)?silent\s+mode$""" +
+            """|^(?:please\s+)?phone\s+on\s+silent$""",
+    )
+
     private val latestNotification = Regex(
         """^what(?:'s| is|s)\s+(?:my\s+|the\s+)?(?:latest|last|newest)\s+notification$""" +
             """|^(?:read|tell me|say)(?:\s+me)?\s+(?:my\s+)?(?:latest|last|newest)\s+notification$""" +
@@ -178,6 +186,13 @@ class LocalIntentRouter {
             return local(LocalCommand.OpenSystemSettings(SettingsSection.Main), "Opening settings")
         }
         return null
+    }
+
+    private fun matchSilence(text: String): LocalMatch? {
+        if (text.contains(" and ")) return null
+        if (isControlQuestion(text)) return null
+        if (!silencePhone.matches(text)) return null
+        return local(LocalCommand.SilencePhone, "Silencing the phone")
     }
 
     private fun matchVolume(text: String): LocalMatch? {

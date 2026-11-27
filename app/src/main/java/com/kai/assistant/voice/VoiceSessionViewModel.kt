@@ -2,6 +2,9 @@ package com.kai.assistant.voice
 
 import android.app.Application
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kai.assistant.KaiApplication
@@ -97,32 +100,40 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     private var settingsLanguage: String = "en"
     private var turnLanguage: String = "en"
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var spokenNow: String = ""
+    private var conversation = false
+    private var bargeCaptured = false
+    private var followUpActive = false
+    private var speakStartedAt = 0L
+    private val followUp = FollowUpWindow()
+    private var followUpRunnable: Runnable? = null
 
     private val tts = TextToSpeechManager(
         context = application,
-        onSpeakingChanged = { speaking ->
-            _ui.update { state ->
-                state.copy(
-                    phase = when {
-                        speaking -> VoicePhase.Speaking
-                        state.phase == VoicePhase.Speaking -> VoicePhase.Idle
-                        else -> state.phase
-                    },
-                )
-            }
-        },
+        onSpeakingChanged = { speaking -> onSpeakingChanged(speaking) },
         onReady = { ready -> _ui.update { it.copy(ttsReady = ready) } },
     )
 
     private val stt = SpeechToTextManager(
         context = application,
         onPartial = { partial ->
+            if (_ui.value.phase == VoicePhase.Speaking && shouldBargeIn(partial, spokenNow)) {
+                bargeCaptured = true
+                followUp.onSpeech()
+                tts.stop()
+            } else if (followUpActive && partial.isNotBlank() && !isAssistantEcho(partial, spokenNow)) {
+                followUp.onSpeech()
+            }
             _ui.update {
                 it.copy(
                     partialText = partial,
                     statusLine = partial.ifBlank { "Listening…" },
                 )
             }
+        },
+        onSpeechStarted = {
+            if (_ui.value.phase != VoicePhase.Speaking) followUp.onSpeech()
         },
         onFinal = { finalText -> onSpeechFinal(finalText) },
         onError = { error ->
@@ -228,6 +239,11 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
 
     fun onPushToTalkPressed() {
         if (_ui.value.pendingConfirmation != null) return
+        conversation = false
+        followUpActive = false
+        bargeCaptured = true
+        followUp.close()
+        clearFollowUpTimer()
         WakeTurnGate.onVoiceSession(true)
         wake.disarm()
         tts.stop()
@@ -250,7 +266,13 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun interruptSpeech() {
+        conversation = false
+        followUpActive = false
+        bargeCaptured = false
+        followUp.close()
+        clearFollowUpTimer()
         tts.stop()
+        stt.cancel()
         SpokenAlert.stop()
         _ui.update {
             it.copy(
@@ -258,6 +280,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 statusLine = "Interrupted. Ready when you are.",
             )
         }
+        releaseWakeIfIdle()
     }
 
     fun confirmPending() {
@@ -344,12 +367,24 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                 statusLine = "Cancelled. Ready when you are.",
             )
         }
-        tts.speak("Okay, cancelled.")
+        say("Okay, cancelled.")
     }
 
     private fun onSpeechFinal(finalText: String) {
         val text = finalText.trim().ifBlank { _ui.value.partialText.trim() }
-        if (text.isBlank()) {
+        if (text.isBlank() || isAssistantEcho(text, spokenNow)) {
+            if (_ui.value.phase == VoicePhase.Speaking) {
+                stt.startListening()
+                return
+            }
+            if (followUpActive && !followUp.expired(SystemClock.elapsedRealtime())) {
+                stt.startListening()
+                return
+            }
+            if (followUpActive) {
+                endFollowUp()
+                return
+            }
             _ui.update {
                 it.copy(
                     phase = VoicePhase.Idle,
@@ -360,6 +395,9 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             releaseWakeIfIdle()
             return
         }
+        followUpActive = false
+        followUp.close()
+        clearFollowUpTimer()
         _ui.update {
             it.copy(
                 phase = VoicePhase.Processing,
@@ -391,55 +429,66 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
                         statusLine = outcome.match.confirmationPrompt,
                     )
                 }
-                tts.speak(outcome.match.confirmationPrompt)
+                say(outcome.match.confirmationPrompt)
             }
             is TurnOutcome.NeedsContactsPermission -> {
                 _contactsPermission.value = ContactsPermissionRequest(
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsCallPermission -> {
                 _callPermission.value = ContactsPermissionRequest(
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsAccessibilitySettings -> {
                 _accessibilityTarget.value = outcome.target
                 _accessibilitySettings.value = System.nanoTime()
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsCalendarPermission -> {
                 _calendarPermission.value = ContactsPermissionRequest(
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsNotificationPermission -> {
                 _notificationPermission.value = ContactsPermissionRequest(
                     token = System.nanoTime(),
                     match = outcome.pending,
                 )
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsPhoto -> {
                 _photoPick.value = System.nanoTime() to outcome.useBackend
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
             is TurnOutcome.NeedsScreenshotConsent -> {
                 _screenshotConsent.value = System.nanoTime()
-                speakAssistant(outcome.explanation)
+                say(outcome.explanation)
             }
-            is TurnOutcome.LocalReady -> speakAssistant(outcome.reply)
-            is TurnOutcome.CloudReady -> speakAssistant(outcome.spoken)
+            is TurnOutcome.LocalReady -> say(outcome.reply)
+            is TurnOutcome.CloudReady -> say(outcome.spoken)
         }
     }
 
-    private fun speakAssistant(reply: String) {
+    private fun say(reply: String) {
+        if (reply.isBlank()) {
+            releaseWakeIfIdle()
+            return
+        }
+        spokenNow = reply
+        bargeCaptured = false
+        conversation = true
+        followUpActive = false
+        followUp.close()
+        clearFollowUpTimer()
+        speakStartedAt = SystemClock.elapsedRealtime()
         _ui.update {
             it.copy(
                 phase = VoicePhase.Speaking,
@@ -447,6 +496,62 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
             )
         }
         tts.speak(reply, turnLanguage)
+        mainHandler.postDelayed({
+            if (conversation && _ui.value.phase == VoicePhase.Speaking) stt.startListening()
+        }, 200)
+    }
+
+    private fun onSpeakingChanged(speaking: Boolean) {
+        if (speaking) {
+            _ui.update { it.copy(phase = VoicePhase.Speaking) }
+            return
+        }
+        if (SystemClock.elapsedRealtime() - speakStartedAt < 300) return
+        if (bargeCaptured) return
+        if (conversation) {
+            beginFollowUp()
+            return
+        }
+        _ui.update { state ->
+            if (state.phase == VoicePhase.Speaking) state.copy(phase = VoicePhase.Idle) else state
+        }
+    }
+
+    private fun beginFollowUp() {
+        followUpActive = true
+        followUp.open(SystemClock.elapsedRealtime())
+        _ui.update {
+            it.copy(phase = VoicePhase.Listening, statusLine = "Listening…", partialText = "")
+        }
+        if (!stt.isListening()) stt.startListening()
+        clearFollowUpTimer()
+        val runnable = Runnable {
+            if (!followUpActive) return@Runnable
+            if (!followUp.expired(SystemClock.elapsedRealtime())) return@Runnable
+            stt.cancel()
+        }
+        followUpRunnable = runnable
+        mainHandler.postDelayed(runnable, FOLLOW_UP_LISTEN_MS)
+    }
+
+    private fun endFollowUp() {
+        conversation = false
+        followUpActive = false
+        followUp.close()
+        clearFollowUpTimer()
+        _ui.update {
+            it.copy(
+                phase = VoicePhase.Idle,
+                statusLine = "Say Hey KAI, or hold the mic to talk.",
+                partialText = "",
+            )
+        }
+        releaseWakeIfIdle()
+    }
+
+    private fun clearFollowUpTimer() {
+        followUpRunnable?.let { mainHandler.removeCallbacks(it) }
+        followUpRunnable = null
     }
 
     private fun onWakePhrase(heard: String) {
@@ -477,6 +582,7 @@ class VoiceSessionViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        clearFollowUpTimer()
         WakeTurnGate.onVoiceSession(false)
         wake.destroy()
         stt.destroy()

@@ -603,7 +603,7 @@ class AssistantTurnProcessor(
         if (match.command is LocalCommand.RunPlan) {
             return runPlan(match.command.steps)
         }
-        val result = withContext(Dispatchers.Main) {
+        val result = withContext(Dispatchers.IO) {
             tools.execute(match.command)
         }
         val reply = result.messageText()
@@ -680,7 +680,7 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun runStep(step: PlanStep): ToolResult {
-        return withContext(Dispatchers.Main) {
+        return withContext(Dispatchers.IO) {
             runCatching { tools.execute(step.command) }
                 .getOrElse { error -> ToolResult.Error(error.message ?: "That step failed.") }
         }

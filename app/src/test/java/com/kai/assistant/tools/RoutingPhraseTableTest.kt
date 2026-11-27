@@ -141,6 +141,8 @@ class RoutingPhraseTableTest {
         "previous" to LocalCommand.MediaControl::class,
         "what's my latest notification" to LocalCommand.ReadLatestNotification::class,
         "mute" to LocalCommand.SetVolume::class,
+        "silent my phone" to LocalCommand.SilencePhone::class,
+        "mute my phone" to LocalCommand.SilencePhone::class,
         "volume down" to LocalCommand.AdjustVolume::class,
         "navigate to mg road" to LocalCommand.OpenMaps::class,
         "directions to the airport" to LocalCommand.OpenMaps::class,

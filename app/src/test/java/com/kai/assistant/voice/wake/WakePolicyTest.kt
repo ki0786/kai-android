@@ -259,9 +259,9 @@ class WakePolicyTest {
         runKeywordHandoff(
             releaseMic = { steps += "release" },
             chime = { steps += "chime" },
-            openVoice = { steps += "voice" },
+            startListening = { steps += "listen" },
         )
-        assertEquals(listOf("release", "chime", "voice"), steps)
+        assertEquals(listOf("release", "chime", "listen"), steps)
     }
 
     @Test

@@ -9,7 +9,6 @@ import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.net.Uri
-import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -18,30 +17,15 @@ import com.kai.assistant.business.AutoReplySettings
 import com.kai.assistant.business.WhatsAppBusinessNotificationListenerService
 
 /**
- * On-phone toggles. Wi-Fi, Bluetooth, and hotspot cannot be switched by an app
- * that targets this SDK, so those open the system screen and say so.
+ * On-phone toggles. Wi-Fi and Bluetooth are switched on the phone. Hotspot
+ * stays a settings note because Android blocks that radio.
  */
-internal class RadioPanelTool(private val context: Context) {
-    fun wifi(enabled: Boolean): ToolResult {
-        val panel = radioUsesPanel(Build.VERSION.SDK_INT)
-        val action = if (panel) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
-        return open("Wi-Fi", enabled, action, panel)
-    }
+internal class RadioPanelTool(context: Context) {
+    private val radios = RadioSwitch(context)
 
-    fun bluetooth(enabled: Boolean): ToolResult =
-        open("Bluetooth", enabled, Settings.ACTION_BLUETOOTH_SETTINGS, usesPanel = false)
+    fun wifi(enabled: Boolean): ToolResult = radios.wifi(enabled)
 
-    private fun open(label: String, enabled: Boolean, action: String, usesPanel: Boolean): ToolResult {
-        val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val opened = runCatching { context.startActivity(intent) }.isSuccess
-        if (!opened) {
-            val state = if (enabled) "on" else "off"
-            return ToolResult.Error(
-                "Android won't let an app turn $label $state, and I couldn't open the settings screen.",
-            )
-        }
-        return ToolResult.Ok(blockedRadioSpeech(label, enabled, usesPanel))
-    }
+    fun bluetooth(enabled: Boolean): ToolResult = radios.bluetooth(enabled)
 }
 
 internal class DoNotDisturbTool(private val context: Context) {

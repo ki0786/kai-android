@@ -44,7 +44,25 @@ internal fun youtubeResultsUrl(query: String): String {
 /** A YouTube link opens that video. Anything else opens search results. */
 internal fun youtubeOpenUrl(query: String): String {
     val id = youtubeVideoId(query)
-    return if (id != null) "https://www.youtube.com/watch?v=$id" else youtubeResultsUrl(query)
+    return if (id != null) youtubeWatchUrl(id) else youtubeResultsUrl(query)
+}
+
+internal fun youtubeWatchUrl(videoId: String): String = "https://www.youtube.com/watch?v=$videoId"
+
+/** First video in a YouTube search page or innertube response. */
+internal fun firstYouTubeVideoId(page: String): String? {
+    val renderer = Regex(""""videoRenderer"\s*:\s*\{"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""")
+    renderer.find(page)?.groupValues?.get(1)?.let { return it }
+    return Regex(""""videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""").find(page)?.groupValues?.get(1)
+}
+
+/** Android innertube search. No provider key. The public web client needs one; this client does not. */
+internal fun youTubeInnertubeBody(query: String): String {
+    val escaped = query
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", " ")
+    return """{"context":{"client":{"clientName":"ANDROID","clientVersion":"19.17.34","hl":"en","gl":"US"}},"query":"$escaped"}"""
 }
 
 internal fun youtubeVideoId(query: String): String? {

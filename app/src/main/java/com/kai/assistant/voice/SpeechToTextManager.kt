@@ -24,6 +24,7 @@ class SpeechToTextManager(
     private val onFinal: (String) -> Unit,
     private val onError: (String) -> Unit,
     private val onListeningChanged: (Boolean) -> Unit = {},
+    private val onSpeechStarted: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -38,6 +39,8 @@ class SpeechToTextManager(
     }
 
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(appContext)
+
+    fun isListening(): Boolean = listening.get()
 
     fun startListening() {
         mainHandler.post {
@@ -124,7 +127,9 @@ class SpeechToTextManager(
         recognizer = created.also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) = Unit
-                override fun onBeginningOfSpeech() = Unit
+                override fun onBeginningOfSpeech() {
+                    onSpeechStarted()
+                }
                 override fun onRmsChanged(rmsdB: Float) = Unit
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
                 override fun onEndOfSpeech() = Unit

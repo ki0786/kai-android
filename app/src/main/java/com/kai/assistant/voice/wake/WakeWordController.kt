@@ -63,7 +63,7 @@ internal object WakeWordController {
     }
 
     fun openVoice(context: Context) {
-        VoiceScreenLaunch.open(context)
+        WakeCommandSession.start(context)
     }
 
     fun postTapToStart(context: Context) {
