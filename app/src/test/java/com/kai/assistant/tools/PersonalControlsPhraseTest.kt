@@ -39,6 +39,13 @@ class PersonalControlsPhraseTest {
         assertEquals(LocalCommand.SilencePhone, command("mute my phone"))
         assertEquals(LocalCommand.SilencePhone, command("put my phone on silent"))
         assertEquals(LocalCommand.SilencePhone, command("turn on silent mode"))
+        assertEquals(LocalCommand.RestoreRinger, command("undo silent"))
+        assertEquals(LocalCommand.RestoreRinger, command("turn off silent"))
+        assertEquals(LocalCommand.RestoreRinger, command("silent off"))
+        assertEquals(LocalCommand.RestoreRinger, command("unsilent"))
+        assertEquals(LocalCommand.RestoreRinger, command("normal mode"))
+        assertEquals(LocalCommand.RestoreRinger, command("ring my phone"))
+        assertEquals(LocalCommand.SetDoNotDisturb(true), command("notification silence"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("brightness up"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("increase brightness"))
         assertEquals(LocalCommand.AdjustBrightness(true), command("turn up the brightness"))
@@ -154,6 +161,9 @@ class PersonalControlsPhraseTest {
             "set volme to 75 percnt",
             "mute",
             "silent my phone",
+            "undo silent",
+            "turn off silent",
+            "ring my phone",
             "set brightness to 40 percent",
             "brightness down",
             "mute my phone",

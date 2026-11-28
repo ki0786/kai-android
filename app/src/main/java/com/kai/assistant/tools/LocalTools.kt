@@ -2,6 +2,7 @@ package com.kai.assistant.tools
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -113,6 +114,7 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
         LocalCommand.SilencePhone -> volume.silencePhone()
+        LocalCommand.RestoreRinger -> volume.restoreRinger()
         is LocalCommand.SetDoNotDisturb -> doNotDisturb.setEnabled(command.enabled)
         is LocalCommand.AdjustBrightness -> brightness.adjust(command.up)
         is LocalCommand.SetBrightness -> brightness.setPercent(command.percent)
@@ -690,16 +692,82 @@ class VolumeTool(private val context: Context) {
         return apply(target, min, max)
     }
 
-    /** Ringer silent. "Silent my phone" is the phone, not a web question. */
+    /**
+     * Zero the ringer only. [AudioManager.RINGER_MODE_SILENT] turns on zen mode
+     * on this phone, so it is never set here. A platform side effect that still
+     * enables Do Not Disturb is put back.
+     */
     fun silencePhone(): ToolResult {
         val stream = AudioManager.STREAM_RING
-        runCatching { audio.ringerMode = AudioManager.RINGER_MODE_SILENT }
+        val memory = RingerMemory(context)
+        val dndBefore = doNotDisturbOn()
+        memory.rememberBeforeSilence(audio.ringerMode, audio.getStreamVolume(stream), dndBefore)
+        val modeBefore = audio.ringerMode
         runCatching { audio.setStreamVolume(stream, 0, 0) }
-        runCatching { audio.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0) }
         writeAudioSystem(stream, 0)
-        val silent = audio.ringerMode == AudioManager.RINGER_MODE_SILENT ||
-            audio.getStreamVolume(stream) == 0
-        return if (silent) ToolResult.Ok(PHONE_SILENT) else ToolResult.Error("I couldn't silence the phone.")
+        if (audio.ringerMode == AudioManager.RINGER_MODE_SILENT && modeBefore != AudioManager.RINGER_MODE_SILENT) {
+            runCatching { audio.ringerMode = modeBefore }
+            runCatching { audio.setStreamVolume(stream, 0, 0) }
+            writeAudioSystem(stream, 0)
+        }
+        if (shouldRevertDoNotDisturb(dndBefore, doNotDisturbOn())) {
+            restoreDoNotDisturbOff()
+        }
+        memory.setAppEnabledDnd(appEnabledDndAfterSilence(dndBefore, doNotDisturbOn()))
+        val silent = audio.getStreamVolume(stream) == 0
+        return if (silent) ToolResult.Ok(PHONE_SILENT) else ToolResult.Error("I couldn't silence the ringer.")
+    }
+
+    /** Restores the ringer. Does not call the backend. */
+    fun restoreRinger(): ToolResult {
+        val stream = AudioManager.STREAM_RING
+        val memory = RingerMemory(context)
+        val saved = memory.snapshot()
+        val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+        val plan = planRingerRestore(saved.previousMode, saved.previousVolume, max)
+        runCatching { audio.ringerMode = plan.ringerMode }
+        runCatching { audio.setStreamVolume(stream, plan.ringVolume, 0) }
+        writeAudioSystem(stream, plan.ringVolume)
+        val turnOff = shouldTurnOffDndOnRestore(
+            appEnabledDoNotDisturb = saved.appEnabledDnd,
+            explicitUserDoNotDisturb = saved.explicitDnd,
+            currentlyDoNotDisturb = doNotDisturbOn(),
+            unmarkedLegacySilent = saved.unmarkedLegacy,
+        )
+        var turnedOff = false
+        if (turnOff) {
+            turnedOff = restoreDoNotDisturbOff() || !doNotDisturbOn()
+            memory.clearAppEnabledDnd()
+        }
+        val mode = audio.ringerMode
+        val volume = audio.getStreamVolume(stream)
+        val ringing = mode == AudioManager.RINGER_MODE_VIBRATE ||
+            (mode != AudioManager.RINGER_MODE_SILENT && volume > 0)
+        return if (ringing) {
+            ToolResult.Ok(ringerRestoredSpoken(turnedOff))
+        } else {
+            ToolResult.Error("I couldn't turn the ringer back on.")
+        }
+    }
+
+    private fun doNotDisturbOn(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val filter = manager?.currentInterruptionFilter
+        if (filter != null && isDoNotDisturbFilter(filter)) return true
+        val zen = runCatching {
+            Settings.Global.getInt(context.contentResolver, "zen_mode", 0)
+        }.getOrDefault(0)
+        return zen != 0
+    }
+
+    /** Puts interruption policy back to all. Does not open a settings screen. */
+    private fun restoreDoNotDisturbOff(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.isNotificationPolicyAccessGranted) return false
+        return runCatching {
+            manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+            !doNotDisturbOn()
+        }.getOrDefault(false)
     }
 
     private fun apply(target: Int, min: Int, max: Int): ToolResult {

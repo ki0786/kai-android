@@ -98,6 +98,87 @@ internal fun volumeSpoken(percent: Int): String = "Volume is ${percent.coerceIn(
 
 internal const val PHONE_SILENT = "Phone is silent."
 
+internal const val RINGER_SILENT = 0
+internal const val RINGER_VIBRATE = 1
+internal const val RINGER_NORMAL = 2
+
+internal const val FILTER_ALL = 1
+internal const val FILTER_PRIORITY = 2
+internal const val FILTER_NONE = 3
+internal const val FILTER_ALARMS = 4
+
+/**
+ * What "silent" is allowed to change. The ringer volume goes to zero.
+ * Ringer-silent, zen mode, and notification policy stay untouched: on this
+ * phone those are Do Not Disturb.
+ */
+internal data class SilentSideEffects(
+    val setsRingerModeSilent: Boolean,
+    val setsInterruptionFilter: Boolean,
+    val setsZenMode: Boolean,
+    val setsNotificationPolicy: Boolean,
+)
+
+internal fun silentSideEffects(): SilentSideEffects = SilentSideEffects(
+    setsRingerModeSilent = false,
+    setsInterruptionFilter = false,
+    setsZenMode = false,
+    setsNotificationPolicy = false,
+)
+
+internal fun isDoNotDisturbFilter(filter: Int): Boolean =
+    filter == FILTER_PRIORITY || filter == FILTER_NONE || filter == FILTER_ALARMS
+
+/** True when a ringer write flipped Do Not Disturb on and it should be put back. */
+internal fun shouldRevertDoNotDisturb(dndBefore: Boolean, dndAfterWrite: Boolean): Boolean =
+    !dndBefore && dndAfterWrite
+
+/** True when the revert failed and this app left Do Not Disturb on. */
+internal fun appEnabledDndAfterSilence(dndBefore: Boolean, dndAfterRevert: Boolean): Boolean =
+    !dndBefore && dndAfterRevert
+
+/**
+ * Undo silent turns Do Not Disturb off only when this app turned it on.
+ * An explicit "turn on DND" is left alone. [unmarkedLegacySilent] covers a
+ * silent command from before this app started recording that fact.
+ */
+internal fun shouldTurnOffDndOnRestore(
+    appEnabledDoNotDisturb: Boolean,
+    explicitUserDoNotDisturb: Boolean,
+    currentlyDoNotDisturb: Boolean,
+    unmarkedLegacySilent: Boolean,
+): Boolean {
+    if (explicitUserDoNotDisturb) return false
+    if (appEnabledDoNotDisturb) return true
+    return unmarkedLegacySilent && currentlyDoNotDisturb
+}
+
+internal data class RingerRestorePlan(
+    val ringerMode: Int,
+    val ringVolume: Int,
+)
+
+/** Puts the ringer back. A saved silent mode becomes normal so the phone can ring. */
+internal fun planRingerRestore(previousMode: Int?, previousVolume: Int?, maxVolume: Int): RingerRestorePlan {
+    val mode = when (previousMode) {
+        RINGER_VIBRATE -> RINGER_VIBRATE
+        RINGER_NORMAL -> RINGER_NORMAL
+        else -> RINGER_NORMAL
+    }
+    val cap = maxVolume.coerceAtLeast(1)
+    val volume = when (mode) {
+        RINGER_VIBRATE -> (previousVolume ?: 0).coerceIn(0, cap)
+        else -> {
+            val saved = previousVolume ?: 0
+            (if (saved > 0) saved else cap / 2).coerceIn(1, cap)
+        }
+    }
+    return RingerRestorePlan(mode, volume)
+}
+
+internal fun ringerRestoredSpoken(turnedDoNotDisturbOff: Boolean): String =
+    if (turnedDoNotDisturbOff) "The ringer is on. Do Not Disturb is off." else "The ringer is on."
+
 /**
  * Quick-settings tile decision. [Already] means the tile already matches,
  * so it must not be tapped. [Click] changes it. [Ignore] is a different tile.

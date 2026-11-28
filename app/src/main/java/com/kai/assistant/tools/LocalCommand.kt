@@ -18,8 +18,10 @@ sealed class LocalCommand {
     data class SearchYouTube(val query: String) : LocalCommand()
     data class SetVolume(val percent: Int) : LocalCommand()
     data class AdjustVolume(val deltaSteps: Int) : LocalCommand()
-    /** Ringer silent. Not a media-volume change and not a web question. */
+    /** Ringer silent. Does not change Do Not Disturb. */
     data object SilencePhone : LocalCommand()
+    /** Puts the ringer back. Clears Do Not Disturb only if this app turned it on. */
+    data object RestoreRinger : LocalCommand()
     data class SetDoNotDisturb(val enabled: Boolean) : LocalCommand()
     /** [up] raises the screen brightness one step. */
     data class AdjustBrightness(val up: Boolean) : LocalCommand()
@@ -186,6 +188,7 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.SetVolume ||
         this is LocalCommand.AdjustVolume ||
         this is LocalCommand.SilencePhone ||
+        this is LocalCommand.RestoreRinger ||
         this is LocalCommand.SetDoNotDisturb ||
         this is LocalCommand.AdjustBrightness ||
         this is LocalCommand.SetBrightness ||

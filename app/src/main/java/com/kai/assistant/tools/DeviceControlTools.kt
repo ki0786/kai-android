@@ -27,6 +27,69 @@ internal class RadioPanelTool(context: Context) {
     fun bluetooth(enabled: Boolean): ToolResult = radios.bluetooth(enabled)
 }
 
+internal class RingerMemory(private val context: Context) {
+    private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun rememberBeforeSilence(ringerMode: Int, ringVolume: Int, dndAlreadyOn: Boolean) {
+        val legacyOwns = !prefs.getBoolean(KEY_HAS_SESSION, false) &&
+            !prefs.getBoolean(KEY_EXPLICIT_KNOWN, false) &&
+            dndAlreadyOn
+        val owned = prefs.getBoolean(KEY_APP_DND, false) || legacyOwns
+        prefs.edit()
+            .putInt(KEY_MODE, ringerMode)
+            .putInt(KEY_VOLUME, ringVolume)
+            .putBoolean(KEY_APP_DND, owned)
+            .putBoolean(KEY_HAS_SESSION, true)
+            .apply()
+    }
+
+    fun setAppEnabledDnd(enabled: Boolean) {
+        if (!enabled) return
+        prefs.edit().putBoolean(KEY_APP_DND, true).apply()
+    }
+
+    fun markExplicitDnd(enabled: Boolean) {
+        prefs.edit()
+            .putBoolean(KEY_EXPLICIT, enabled)
+            .putBoolean(KEY_EXPLICIT_KNOWN, true)
+            .putBoolean(KEY_APP_DND, false)
+            .apply()
+    }
+
+    fun clearAppEnabledDnd() {
+        prefs.edit().putBoolean(KEY_APP_DND, false).putBoolean(KEY_HAS_SESSION, true).apply()
+    }
+
+    fun snapshot(): RingerMemorySnapshot {
+        val hasSession = prefs.getBoolean(KEY_HAS_SESSION, false)
+        return RingerMemorySnapshot(
+            previousMode = if (hasSession) prefs.getInt(KEY_MODE, RINGER_NORMAL) else null,
+            previousVolume = if (hasSession) prefs.getInt(KEY_VOLUME, -1).takeIf { it >= 0 } else null,
+            appEnabledDnd = prefs.getBoolean(KEY_APP_DND, false),
+            explicitDnd = prefs.getBoolean(KEY_EXPLICIT, false) && prefs.getBoolean(KEY_EXPLICIT_KNOWN, false),
+            unmarkedLegacy = !hasSession && !prefs.getBoolean(KEY_EXPLICIT_KNOWN, false),
+        )
+    }
+
+    private companion object {
+        const val PREFS = "kai_ringer"
+        const val KEY_MODE = "mode"
+        const val KEY_VOLUME = "volume"
+        const val KEY_APP_DND = "app_dnd"
+        const val KEY_EXPLICIT = "explicit_dnd"
+        const val KEY_EXPLICIT_KNOWN = "explicit_dnd_known"
+        const val KEY_HAS_SESSION = "has_session"
+    }
+}
+
+internal data class RingerMemorySnapshot(
+    val previousMode: Int?,
+    val previousVolume: Int?,
+    val appEnabledDnd: Boolean,
+    val explicitDnd: Boolean,
+    val unmarkedLegacy: Boolean,
+)
+
 internal class DoNotDisturbTool(private val context: Context) {
     fun setEnabled(enabled: Boolean): ToolResult {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -52,8 +115,14 @@ internal class DoNotDisturbTool(private val context: Context) {
         }.getOrNull() ?: return ToolResult.Error("I couldn't change Do Not Disturb.")
         val onNow = applied != NotificationManager.INTERRUPTION_FILTER_ALL
         return when {
-            enabled && onNow -> ToolResult.Ok(dndSpoken(true))
-            !enabled && !onNow -> ToolResult.Ok(dndSpoken(false))
+            enabled && onNow -> {
+                RingerMemory(context).markExplicitDnd(true)
+                ToolResult.Ok(dndSpoken(true))
+            }
+            !enabled && !onNow -> {
+                RingerMemory(context).markExplicitDnd(false)
+                ToolResult.Ok(dndSpoken(false))
+            }
             enabled -> ToolResult.Error("I couldn't turn Do Not Disturb on.")
             else -> ToolResult.Error("I couldn't turn Do Not Disturb off.")
         }

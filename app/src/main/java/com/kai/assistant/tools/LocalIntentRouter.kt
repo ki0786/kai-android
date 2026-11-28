@@ -153,6 +153,16 @@ class LocalIntentRouter {
             """|^(?:please\s+)?phone\s+on\s+silent$""",
     )
 
+    private val restoreRinger = Regex(
+        """^(?:please\s+)?undo\s+silent(?:\s+mode)?$""" +
+            """|^(?:please\s+)?unsilent(?:\s+(?:my\s+|the\s+)?phone|\s+mode)?$""" +
+            """|^(?:please\s+)?turn\s+off\s+silent(?:\s+mode)?$""" +
+            """|^(?:please\s+)?silent(?:\s+mode)?\s+off$""" +
+            """|^(?:please\s+)?normal\s+mode$""" +
+            """|^(?:please\s+)?ring\s+my\s+phone$""" +
+            """|^(?:please\s+)?(?:turn\s+)?(?:the\s+)?ringer\s+on$""",
+    )
+
     private val latestNotification = Regex(
         """^what(?:'s| is|s)\s+(?:my\s+|the\s+)?(?:latest|last|newest)\s+notification$""" +
             """|^(?:read|tell me|say)(?:\s+me)?\s+(?:my\s+)?(?:latest|last|newest)\s+notification$""" +
@@ -196,8 +206,12 @@ class LocalIntentRouter {
     private fun matchSilence(text: String): LocalMatch? {
         if (text.contains(" and ")) return null
         if (isControlQuestion(text)) return null
+        if (Regex("""\b(?:do\s+not\s+disturb|dnd|notification\s+silence)\b""").containsMatchIn(text)) return null
+        if (restoreRinger.matches(text)) {
+            return local(LocalCommand.RestoreRinger, "Turning the ringer on")
+        }
         if (!silencePhone.matches(text)) return null
-        return local(LocalCommand.SilencePhone, "Silencing the phone")
+        return local(LocalCommand.SilencePhone, "Silencing the ringer")
     }
 
     private fun matchVolume(text: String): LocalMatch? {
@@ -726,6 +740,13 @@ class LocalIntentRouter {
 
     private fun matchDoNotDisturb(text: String): LocalMatch? {
         if (isControlQuestion(text)) return null
+        if (Regex("""\b(?:notification\s+silence|silence\s+notifications|silent\s+notifications)\b""").containsMatchIn(text)) {
+            val off = Regex("""\b(?:off|disable|undo|stop)\b""").containsMatchIn(text)
+            return local(
+                LocalCommand.SetDoNotDisturb(!off),
+                if (off) "Turning Do Not Disturb off" else "Turning Do Not Disturb on",
+            )
+        }
         if (!Regex("""\b(?:do\s+not\s+disturb|dnd)\b""").containsMatchIn(text)) return null
         if (Regex("""\bsettings\b""").containsMatchIn(text)) return null
         if (Regex("""^(?:open|show|launch)\b""").containsMatchIn(text)) return null
