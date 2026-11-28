@@ -125,6 +125,37 @@ class BooksVoiceTest {
     }
 
     @Test
+    fun debtToANameSavesOnThePhone() {
+        val phrases = listOf(
+            "I owe 322000 to Poppy mattress" to 322_000L,
+            "I have a debt of 322000 to Poppy mattress" to 322_000L,
+            "I have a depth of 3 lakh 22,000 to Poppy mattress" to 322_000L,
+            "Io Treac 22,000 to Poppy mattress" to 22_000L,
+        )
+        phrases.forEach { (phrase, rupees) ->
+            val match = router.match(phrase)
+            assertNotNull("\"$phrase\" fell through to chat", match)
+            assertTrue(match!!.command.staysOnDevice())
+            val debt = (match.command as LocalCommand.Books).action as BooksAction.OwnerDebt
+            assertEquals(phrase, "Poppy Mattress", debt.lender)
+            assertEquals(phrase, rupees, debt.amount)
+            val outcome = BooksEngine(zone = zone, ids = { "debt" }).apply(
+                BooksSnapshot(),
+                debt,
+                now.toInstant().toEpochMilli(),
+            )
+            assertEquals(rupees, outcome.snapshot.debts.single().balance)
+            assertEquals("Poppy Mattress", outcome.snapshot.debts.single().lender)
+            assertTrue(outcome.spoken.contains("Poppy Mattress"))
+            assertTrue(outcome.spoken.contains(formatRupees(rupees)))
+            assertFalse(outcome.spoken.contains("say \"I owe"))
+        }
+        val parsed = parseLeadingRupees("3 lakh 22000")
+        assertEquals(322_000L, parsed?.first)
+        assertEquals("", parsed?.second)
+    }
+
+    @Test
     fun saleAndLabourMaterialStayInTheBooks() {
         val sale = books("sold a sofa for 25000") as BooksAction.Order
         assertEquals("Sofa", sale.item)

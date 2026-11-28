@@ -91,6 +91,7 @@ class SpeechToTextManager(
 
     fun destroy() {
         mainHandler.post {
+            MicEarconSilence.coverStop(appContext)
             listening.set(false)
             onListeningChanged(false)
             runCatching { recognizer?.destroy() }
