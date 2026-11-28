@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * It prefers the on-device recognizer and passes the selected language.
  * There is no separate noise-reduction model; noisy rooms use the platform recognizer only.
  * The mic is active only between [startListening] and [stopListening] / [cancel].
+ * Opening and closing it does not change any stream volume. On this phone the
+ * system and DTMF streams are the ringer, so ducking them flips silent.
  */
 class SpeechToTextManager(
     context: Context,
@@ -24,6 +26,7 @@ class SpeechToTextManager(
     private val onFinal: (String) -> Unit,
     private val onError: (String) -> Unit,
     private val onListeningChanged: (Boolean) -> Unit = {},
+    private val onSpeechStarted: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -38,6 +41,8 @@ class SpeechToTextManager(
     }
 
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(appContext)
+
+    fun isListening(): Boolean = listening.get()
 
     fun startListening() {
         mainHandler.post {
@@ -124,7 +129,9 @@ class SpeechToTextManager(
         recognizer = created.also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) = Unit
-                override fun onBeginningOfSpeech() = Unit
+                override fun onBeginningOfSpeech() {
+                    onSpeechStarted()
+                }
                 override fun onRmsChanged(rmsdB: Float) = Unit
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
                 override fun onEndOfSpeech() = Unit

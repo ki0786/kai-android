@@ -36,6 +36,9 @@ internal object PhraseNormalizer {
         """\bscreen\s+shot\b""" to "screenshot",
         """\bwi\s+fi\b""" to "wifi",
         """\bblue\s+tooth\b""" to "bluetooth",
+        """\b(?:volme|volum|voulme|volumn|voulume|voluem|vloume)\b""" to "volume",
+        """\b(?:percnt|persent|precent|pecent|percen|percet)\b""" to "percent",
+        """\b(?:brightnes|brightnss|briteness|brightess)\b""" to "brightness",
         """^dail\b""" to "dial",
         """^(?:cal|cll|kall)\s+(?=\p{L})""" to "call ",
         """\bphn\b""" to "phone",
@@ -70,7 +73,16 @@ private val units = mapOf(
     "twelve" to 12, "thirteen" to 13, "fourteen" to 14, "fifteen" to 15, "sixteen" to 16,
     "seventeen" to 17, "eighteen" to 18, "nineteen" to 19,
 )
-private val tens = mapOf("twenty" to 20, "thirty" to 30, "forty" to 40, "fifty" to 50, "sixty" to 60, "ninety" to 90)
+private val tens = mapOf(
+    "twenty" to 20,
+    "thirty" to 30,
+    "forty" to 40,
+    "fifty" to 50,
+    "sixty" to 60,
+    "seventy" to 70,
+    "eighty" to 80,
+    "ninety" to 90,
+)
 
 /**
  * "five minutes" -> "5 minutes", "half an hour" -> "30 minutes", "seven thirty" -> "7:30".
@@ -78,6 +90,8 @@ private val tens = mapOf("twenty" to 20, "thirty" to 30, "forty" to 40, "fifty" 
  */
 internal fun digitsForNumberWords(lower: String): String {
     var text = lower
+        .replace(Regex("""\b(?:one|a)\s+hundred\b"""), "100")
+        .replace(Regex("""\bhundred\b"""), "100")
         .replace(Regex("""\bhalf\s+an?\s+hour\b"""), "30 minutes")
         .replace(Regex("""\b(?:a\s+)?quarter\s+(?:of\s+)?an?\s+hour\b"""), "15 minutes")
         .replace(Regex("""\ban?\s+hour\s+and\s+a\s+half\b"""), "90 minutes")

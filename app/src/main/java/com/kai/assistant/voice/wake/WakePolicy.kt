@@ -380,13 +380,11 @@ internal fun modelStatusLabel(status: WakeModelStatus): String = when (status) {
     is WakeModelStatus.Failed -> "Could not download the Hey KAI model. ${status.message}"
 }
 
-/** Release the wake mic, then chime, then open the command screen. Order is the contract. */
+/** Release the wake mic, then listen. No chime. The KAI screen stays where it was. */
 internal fun runKeywordHandoff(
     releaseMic: () -> Unit,
-    chime: () -> Unit,
-    openVoice: () -> Unit,
+    startListening: () -> Unit,
 ) {
     releaseMic()
-    chime()
-    openVoice()
+    startListening()
 }

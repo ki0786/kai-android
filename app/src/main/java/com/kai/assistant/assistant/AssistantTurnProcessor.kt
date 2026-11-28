@@ -18,6 +18,7 @@ import com.kai.assistant.tools.ToolResult
 import com.kai.assistant.tools.WhatsAppCallResolution
 import com.kai.assistant.tools.messageText
 import com.kai.assistant.tools.WhatsAppResolution
+import com.kai.assistant.tools.BRAIN_OFFLINE
 import com.kai.assistant.tools.RESEARCH_OFFLINE
 import com.kai.assistant.tools.RESEARCH_UNAVAILABLE
 import com.kai.assistant.tools.formatResearchReply
@@ -602,7 +603,7 @@ class AssistantTurnProcessor(
         if (match.command is LocalCommand.RunPlan) {
             return runPlan(match.command.steps)
         }
-        val result = withContext(Dispatchers.Main) {
+        val result = withContext(Dispatchers.IO) {
             tools.execute(match.command)
         }
         val reply = result.messageText()
@@ -679,7 +680,7 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun runStep(step: PlanStep): ToolResult {
-        return withContext(Dispatchers.Main) {
+        return withContext(Dispatchers.IO) {
             runCatching { tools.execute(step.command) }
                 .getOrElse { error -> ToolResult.Error(error.message ?: "That step failed.") }
         }
@@ -707,12 +708,32 @@ class AssistantTurnProcessor(
         memory.historyEnabled = settings.chatHistoryEnabled
     }
 
+    /**
+     * Chat and research wait on the brain. A failed health ping stays on the phone:
+     * no crash, and the calls, alarms, books, photos, and device controls still run.
+     */
+    private suspend fun brainOfflineOrNull(): TurnOutcome? {
+        val online = withContext(Dispatchers.IO) {
+            try {
+                api.pingHealth()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+        }
+        if (online) return null
+        remember(BRAIN_OFFLINE, deviceOnly = true)
+        return TurnOutcome.CloudReady(reply = BRAIN_OFFLINE, offline = true, spoken = BRAIN_OFFLINE)
+    }
+
     private fun rememberReady(text: String, deviceOnly: Boolean): TurnOutcome {
         remember(text, deviceOnly)
         return TurnOutcome.LocalReady(text)
     }
 
     private suspend fun callResearch(query: String): TurnOutcome {
+        brainOfflineOrNull()?.let { return it }
         val result = withContext(Dispatchers.IO) {
             api.research(query, SessionMessageStore.SESSION_ID)
         }
@@ -739,6 +760,7 @@ class AssistantTurnProcessor(
     }
 
     private suspend fun callCloud(): TurnOutcome {
+        brainOfflineOrNull()?.let { return it }
         val history = SessionMessageStore.snapshot()
             .filter { it.role != MessageRole.System && !it.deviceOnly && it.text.isNotBlank() }
             .takeLast(24)

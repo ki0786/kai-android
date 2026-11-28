@@ -2,11 +2,13 @@ package com.kai.assistant.tools
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
@@ -17,6 +19,10 @@ import android.os.BatteryManager
 import android.provider.Settings
 import android.widget.Toast
 import com.kai.assistant.books.BooksReminders
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import com.kai.assistant.books.BooksStore
 import java.lang.ref.WeakReference
 import java.text.DateFormat
@@ -55,6 +61,11 @@ class LocalToolRouter(private val context: Context) {
     private val alarms = AlarmTimerTool(context)
     private val settings = OpenSettingsTool(context)
     private val volume = VolumeTool(context)
+    private val radios = RadioPanelTool(context)
+    private val doNotDisturb = DoNotDisturbTool(context)
+    private val brightness = BrightnessTool(context)
+    private val media = MediaControlTool(context)
+    private val notifications = LatestNotificationTool(context)
     private val deviceInfo = DeviceInfoTool(context)
     private val calls = CallContactTool(context)
     private val whatsApp = WhatsAppTool(context)
@@ -103,6 +114,15 @@ class LocalToolRouter(private val context: Context) {
         is LocalCommand.SearchYouTube -> launcher.searchYouTube(command.query)
         is LocalCommand.SetVolume -> volume.setPercent(command.percent)
         is LocalCommand.AdjustVolume -> volume.adjustSteps(command.deltaSteps)
+        LocalCommand.SilencePhone -> volume.silencePhone()
+        LocalCommand.RestoreRinger -> volume.restoreRinger()
+        is LocalCommand.SetDoNotDisturb -> doNotDisturb.setEnabled(command.enabled)
+        is LocalCommand.AdjustBrightness -> brightness.adjust(command.up)
+        is LocalCommand.SetBrightness -> brightness.setPercent(command.percent)
+        is LocalCommand.SetWifi -> radios.wifi(command.enabled)
+        is LocalCommand.SetBluetooth -> radios.bluetooth(command.enabled)
+        is LocalCommand.MediaControl -> media.control(command.action)
+        LocalCommand.ReadLatestNotification -> notifications.read()
         is LocalCommand.SetAlarm -> alarms.setAlarm(
             command.hour,
             command.minute,
@@ -407,41 +427,86 @@ class LaunchAppTool(private val context: Context) {
     }
 
     fun searchYouTube(query: String): ToolResult {
-        val uri = Uri.parse(youtubeResultsUrl(query))
-        val youtube = Intent(Intent.ACTION_VIEW, uri).apply {
+        val videoId = youtubeVideoId(query) ?: fetchFirstVideoId(query)
+            ?: return ToolResult.Error("I couldn't start that video on YouTube.")
+        val play = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId")).apply {
+            setPackage(YOUTUBE_PACKAGE)
+            putExtra("VIDEO_ID", videoId)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val watch = Intent(Intent.ACTION_VIEW, Uri.parse(youtubeWatchUrl(videoId))).apply {
             setPackage(YOUTUBE_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val view = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val browser = Intent(Intent.ACTION_VIEW, Uri.parse(youtubeWatchUrl(videoId)))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching {
-            if (youtube.resolveActivity(context.packageManager) != null) {
-                startInFront(youtube)
-            } else {
-                startInFront(view)
+            val pm = context.packageManager
+            when {
+                play.resolveActivity(pm) != null -> startInFront(play)
+                watch.resolveActivity(pm) != null -> startInFront(watch)
+                else -> startInFront(browser)
             }
-            ToolResult.Ok("Searching YouTube for $query.")
+            ToolResult.Ok("Playing that on YouTube.")
         }.getOrElse {
             ToolResult.Error("I couldn't open YouTube.")
         }
+    }
+
+    private fun fetchFirstVideoId(query: String): String? {
+        val client = youtubeClient
+        val innertube = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36")
+            .header("Content-Type", "application/json")
+            .post(youTubeInnertubeBody(query).toRequestBody("application/json".toMediaType()))
+            .build()
+        val fromApi = runCatching {
+            client.newCall(innertube).execute().use { response ->
+                if (!response.isSuccessful) null else firstYouTubeVideoId(response.body?.string().orEmpty())
+            }
+        }.getOrNull()
+        if (fromApi != null) return fromApi
+        val page = Request.Builder()
+            .url(youtubeResultsUrl(query))
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            )
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Cookie", "CONSENT=YES+cb")
+            .build()
+        return runCatching {
+            client.newCall(page).execute().use { response ->
+                if (!response.isSuccessful) null else firstYouTubeVideoId(response.body?.string().orEmpty())
+            }
+        }.getOrNull()
     }
 
     private fun startInFront(intent: Intent) {
         // startActivity on the application context can return without the system
         // sending an intent (no wm_new_intent) while this method still said it
         // launched. The resumed activity is the call that actually sends it.
-        // When an intent is sent, YouTube does come to the front.
+        // When Hey KAI stays in the background there is no resumed activity, so
+        // the overlay path starts the target app and leaves KAI where it was.
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
         )
         val activity = ForegroundActivity.get()
-            ?: throw IllegalStateException("I couldn't open that app.")
-        activity.startActivity(intent)
+        if (activity != null) {
+            activity.startActivity(intent)
+            return
+        }
+        BackgroundActivityStart.start(context, intent)
     }
 
     private companion object {
         const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+        val youtubeClient: OkHttpClient = OkHttpClient.Builder()
+            .callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
     }
 }
 
@@ -582,7 +647,11 @@ class OpenSettingsTool(private val context: Context) {
             SettingsSection.Sound -> Settings.ACTION_SOUND_SETTINGS
             SettingsSection.Battery -> Settings.ACTION_BATTERY_SAVER_SETTINGS
         }
-        val note = if (section == SettingsSection.Main) "" else "Android doesn't let apps change this, so tap the switch."
+        val note = when (section) {
+            SettingsSection.Main -> ""
+            SettingsSection.Hotspot -> HOTSPOT_BLOCKED
+            else -> "Android doesn't let apps change this, so tap the switch."
+        }
         val opened = open(action, section.label, note)
         if (opened !is ToolResult.Error || section == SettingsSection.Main) return opened
         return open(Settings.ACTION_SETTINGS, "settings", "I couldn't open ${section.label} directly.")
@@ -612,34 +681,230 @@ class VolumeTool(private val context: Context) {
         get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     fun setPercent(percent: Int): ToolResult {
-        val clamped = percent.coerceIn(0, 100)
-        return runCatching {
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val index = ((clamped / 100f) * max).toInt().coerceIn(0, max)
-            audio.setStreamVolume(AudioManager.STREAM_MUSIC, index, AudioManager.FLAG_SHOW_UI)
-            ToolResult.Ok("Volume set to $clamped%.")
-        }.getOrElse { ToolResult.Error(it.message ?: "Could not set volume.") }
+        val (min, max) = range()
+        val target = indexForPercent(percent, min, max)
+        return apply(target, min, max)
     }
 
     fun adjustSteps(deltaSteps: Int): ToolResult {
+        val (min, max) = range()
+        val current = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val target = steppedVolumeIndex(current, deltaSteps, min, max)
+        return apply(target, min, max)
+    }
+
+    /**
+     * Mutes the ring stream. Does not call setRingerMode(SILENT): on this phone
+     * that becomes vibrate and turns zen on. Zen and the interruption filter are
+     * forced off before the reply, including when the mute did not stick.
+     */
+    fun silencePhone(): ToolResult {
+        val stream = AudioManager.STREAM_RING
+        val memory = RingerMemory(context)
+        val explicitDnd = memory.snapshot().explicitDnd
+        memory.rememberBeforeSilence(audio.ringerMode, audio.getStreamVolume(stream), doNotDisturbOn())
+        forceStreamVolume(stream, 0)
+        if (shouldForceZenOff()) clearDoNotDisturb()
+        var volume = audio.getStreamVolume(stream)
+        var zen = readZen()
+        var filterAll = interruptionFilterAll()
+        if (volume != 0) forceStreamVolume(stream, 0)
+        if (zen != ZEN_OFF || !filterAll) clearDoNotDisturb()
+        volume = audio.getStreamVolume(stream)
+        zen = readZen()
+        filterAll = interruptionFilterAll()
+        memory.setAppEnabledDnd(appEnabledDndAfterSilence(explicitDnd, zen != ZEN_OFF || !filterAll))
+        val speech = silentSpeech(volume, zen, filterAll)
+        return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error("I couldn't silence the ringer.")
+    }
+
+    /**
+     * Normal mode and an audible ring volume. The spoken line uses the readback,
+     * not the request. Does not turn Do Not Disturb on.
+     */
+    fun restoreRinger(): ToolResult {
+        val stream = AudioManager.STREAM_RING
+        val memory = RingerMemory(context)
+        val saved = memory.snapshot()
+        val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+        val plan = planRingerRestore(saved.previousVolume, max)
+        applyRinger(plan.ringerMode, plan.ringVolume)
+        val turnOff = shouldTurnOffDndOnRestore(
+            appEnabledDoNotDisturb = saved.appEnabledDnd,
+            explicitUserDoNotDisturb = saved.explicitDnd,
+            currentlyDoNotDisturb = doNotDisturbOn(),
+            unmarkedLegacySilent = saved.unmarkedLegacy,
+        )
+        var turnedOff = false
+        if (turnOff && !saved.explicitDnd) {
+            turnedOff = restoreDoNotDisturbOff()
+            memory.clearAppEnabledDnd()
+            if (doNotDisturbOn()) turnedOff = false
+            applyRinger(plan.ringerMode, plan.ringVolume)
+        }
+        val speech = ringerRestoreSpeech(audio.ringerMode, readIndex(stream), turnedOff && !doNotDisturbOn())
+        return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error("I couldn't turn the ringer back on.")
+    }
+
+    private fun applyRinger(mode: Int, volume: Int) {
+        forceRingerMode(mode)
+        forceStreamVolume(AudioManager.STREAM_RING, volume)
+        if (audio.ringerMode != mode || readIndex(AudioManager.STREAM_RING) != volume) {
+            forceRingerMode(mode)
+            forceStreamVolume(AudioManager.STREAM_RING, volume)
+        }
+    }
+
+    private fun forceRingerMode(mode: Int) {
+        repeat(2) {
+            if (audio.ringerMode == mode) return
+            runCatching { audio.ringerMode = mode }
+        }
+        if (audio.ringerMode == mode) return
+        runCatching {
+            Settings.Global.putInt(context.contentResolver, "mode_ringer", mode)
+        }
+    }
+
+    private fun readZen(): Int =
+        runCatching { Settings.Global.getInt(context.contentResolver, "zen_mode", ZEN_OFF) }.getOrDefault(ZEN_OFF)
+
+    /** Interruption filter ALL and zen off. Does not open a settings screen. */
+    private fun clearDoNotDisturb() {
+        forceZenOff()
+        if (readZen() == ZEN_OFF && interruptionFilterAll()) return
+        forceZenOff()
+    }
+
+    private fun interruptionFilterAll(): Boolean = !interruptionIsDnd(notificationManager())
+
+    private fun notificationManager(): NotificationManager? =
+        context.getSystemService(NotificationManager::class.java)
+
+    /** Interruption filter ALL and zen off. Does not open a settings screen. */
+    private fun forceZenOff() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (manager != null && manager.isNotificationPolicyAccessGranted) {
+            runCatching { manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+        }
+        runCatching { Settings.Global.putInt(context.contentResolver, "zen_mode", ZEN_OFF) }
+        val start = SystemClock.elapsedRealtime()
+        while (SystemClock.elapsedRealtime() - start < 500) {
+            if (readZen() == ZEN_OFF && !interruptionIsDnd(manager)) return
+            Thread.sleep(40)
+        }
+    }
+
+    private fun interruptionIsDnd(manager: NotificationManager?): Boolean {
+        val filter = manager?.currentInterruptionFilter ?: return false
+        return isDoNotDisturbFilter(filter)
+    }
+
+    private fun forceStreamVolume(stream: Int, target: Int) {
+        audio.setStreamVolume(stream, target, 0)
+        if (readIndex(stream) != target) {
+            audio.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
+        }
+        if (readIndex(stream) != target) writeAudioSystem(stream, target)
+        if (readIndex(stream) != target) stepUntil(stream, target)
+    }
+
+    private fun doNotDisturbOn(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val filter = manager?.currentInterruptionFilter
+        if (filter != null && isDoNotDisturbFilter(filter)) return true
+        val zen = runCatching {
+            Settings.Global.getInt(context.contentResolver, "zen_mode", 0)
+        }.getOrDefault(0)
+        return zen != 0
+    }
+
+    /** Puts interruption policy back to all. Does not open a settings screen. */
+    private fun restoreDoNotDisturbOff(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.isNotificationPolicyAccessGranted) return false
         return runCatching {
-            val direction = when {
-                deltaSteps > 0 -> AudioManager.ADJUST_RAISE
-                deltaSteps < 0 -> AudioManager.ADJUST_LOWER
-                else -> return ToolResult.Ok("Volume unchanged.")
+            manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+            !doNotDisturbOn()
+        }.getOrDefault(false)
+    }
+
+    private fun apply(target: Int, min: Int, max: Int): ToolResult {
+        return runCatching {
+            val stream = AudioManager.STREAM_MUSIC
+            // Flags of 0 write the stream. FLAG_SHOW_UI is ignored on this vivo,
+            // so a later read still reports the old percent.
+            audio.setStreamVolume(stream, target, 0)
+            if (readIndex(stream) != target) {
+                audio.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
             }
-            repeat(kotlin.math.abs(deltaSteps)) {
-                audio.adjustStreamVolume(
-                    AudioManager.STREAM_MUSIC,
-                    direction,
-                    AudioManager.FLAG_SHOW_UI,
-                )
-            }
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val current = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val percent = (current * 100) / max
-            ToolResult.Ok("Volume now about $percent%.")
-        }.getOrElse { ToolResult.Error(it.message ?: "Could not adjust volume.") }
+            if (readIndex(stream) != target) writeAudioSystem(stream, target)
+            if (readIndex(stream) != target) stepUntil(stream, target)
+            val now = readIndex(stream).coerceIn(min, max)
+            ToolResult.Ok(volumeSpoken(percentForIndex(now, min, max)))
+        }.getOrElse { ToolResult.Error(it.message ?: "Could not set volume.") }
+    }
+
+    private fun range(): Pair<Int, Int> {
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val min = if (Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(AudioManager.STREAM_MUSIC) else 0
+        return min.coerceAtMost(max) to max
+    }
+
+    private fun readIndex(stream: Int): Int {
+        val manager = audio.getStreamVolume(stream)
+        val speaker = audioSystemIndex(stream, DEVICE_OUT_SPEAKER)
+        return when {
+            speaker == null -> manager
+            speaker == manager -> manager
+            else -> speaker
+        }
+    }
+
+    private fun stepUntil(stream: Int, target: Int) {
+        var guard = 0
+        while (guard < 40) {
+            val now = readIndex(stream)
+            if (now == target) return
+            val direction = if (target > now) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+            audio.adjustStreamVolume(stream, direction, 0)
+            val next = readIndex(stream)
+            if (next == now) return
+            guard++
+        }
+    }
+
+    private fun writeAudioSystem(stream: Int, index: Int) {
+        val method = audioSystemMethod("setStreamVolumeIndex", 3) ?: return
+        for (device in OUTPUT_DEVICES) {
+            runCatching { method.invoke(null, stream, index, device) }
+        }
+    }
+
+    private fun audioSystemIndex(stream: Int, device: Int): Int? {
+        val method = audioSystemMethod("getStreamVolumeIndex", 2) ?: return null
+        val value = runCatching { method.invoke(null, stream, device) }.getOrNull() ?: return null
+        return value as? Int
+    }
+
+    private fun audioSystemMethod(name: String, arity: Int): java.lang.reflect.Method? {
+        return runCatching {
+            val type = Int::class.javaPrimitiveType ?: return null
+            val params = Array(arity) { type }
+            Class.forName("android.media.AudioSystem").getMethod(name, *params)
+        }.getOrNull()
+    }
+
+    private companion object {
+        const val DEVICE_OUT_SPEAKER = 0x2
+        val OUTPUT_DEVICES = intArrayOf(
+            0x2,
+            0x1,
+            0x4,
+            0x8,
+            0x80,
+            0x40000000,
+        )
     }
 }
 

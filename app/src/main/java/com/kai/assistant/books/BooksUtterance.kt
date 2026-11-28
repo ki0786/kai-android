@@ -35,6 +35,8 @@ object BooksUtterance {
         .replace("₹", " ")
         .replace(Regex("""\b(?:rs\.?|rupees?|inr)\b"""), " ")
         .replace(Regex("""\blabor\b"""), "labour")
+        .replace(Regex("""\bdepth\b"""), "debt")
+        .replace(Regex("""\b(?:io|i)\s+treac\b"""), "i owe")
         .replace(",", "")
         .replace(Regex("""[?.!]+"""), " ")
         .replace(Regex("""\s+"""), " ")
@@ -279,6 +281,7 @@ object BooksUtterance {
             val lender = if (loan.groups["demo"] != null) "demo bank" else "bank"
             return BooksAction.OwnerDebt(titleParty(lender), amount, dueDayOrNull(loan, now))
         }
+        oweAmountTo(text, now)?.let { return it }
         val explicit = listOf(
             Regex("""^(?:my\s+)?owner\s+debt\s+(?:to\s+)?(?<party>.+?)\s+(?:is\s+)?$AMOUNT(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
             Regex("""^my\s+debt\s+(?:to\s+)?(?<party>.+?)\s+(?:is\s+)?$AMOUNT(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
@@ -291,6 +294,23 @@ object BooksUtterance {
             val party = titleParty(match.groups["party"]?.value.orEmpty())
             if (party.isBlank()) return null
             return BooksAction.OwnerDebt(party, amount, dueDayOrNull(match, now))
+        }
+        return null
+    }
+
+    /** "I owe 322000 to Poppy mattress", including depth/lakh and a loose "I owe". */
+    private fun oweAmountTo(text: String, now: ZonedDateTime): BooksAction.OwnerDebt? {
+        val patterns = listOf(
+            Regex("""^i\s+owe\s+(?<money>.+?)\s+to\s+(?:the\s+)?(?<party>.+?)(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
+            Regex("""^i\s+have\s+(?:a\s+)?debt\s+of\s+(?<money>.+?)\s+to\s+(?:the\s+)?(?<party>.+?)(?:\s+due\s+on\s+(?:the\s+)?$DAY)?$"""),
+        )
+        for (pattern in patterns) {
+            val match = pattern.matchEntire(text) ?: continue
+            val parsed = parseLeadingRupees(match.groups["money"]?.value.orEmpty()) ?: return null
+            if (parsed.second.isNotBlank()) return null
+            val party = titleParty(match.groups["party"]?.value.orEmpty())
+            if (party.isBlank()) return null
+            return BooksAction.OwnerDebt(party, parsed.first, dueDayOrNull(match, now))
         }
         return null
     }

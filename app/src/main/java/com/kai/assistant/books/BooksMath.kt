@@ -234,6 +234,41 @@ fun titleParty(raw: String): String {
     }
 }
 
+private val leadingRupee = Regex(
+    """^(\d+(?:\.\d+)?)(?:\s+(crores?|lakhs?|lacs?|thousands?|k)\b)?""",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * Reads a rupee amount from the start of [text], including "3 lakh 22000".
+ * Returns the rupees and the unread remainder.
+ */
+internal fun parseLeadingRupees(text: String): Pair<Long, String>? {
+    var rest = text.trim()
+    var total = 0.0
+    var consumed = false
+    while (rest.isNotEmpty()) {
+        val match = leadingRupee.find(rest) ?: break
+        if (match.range.first != 0) break
+        val number = match.groupValues[1].toDoubleOrNull() ?: break
+        val unit = match.groupValues[2].lowercase()
+        val scaled = when {
+            unit.startsWith("crore") -> number * 10_000_000
+            unit.startsWith("lakh") || unit.startsWith("lac") -> number * 100_000
+            unit == "k" || unit.startsWith("thousand") -> number * 1_000
+            unit.isEmpty() -> number
+            else -> break
+        }
+        if (scaled < 0) return null
+        total += scaled
+        consumed = true
+        rest = rest.substring(match.range.last + 1).trim().removePrefix("and ").trim()
+        if (unit.isEmpty() || rest.isEmpty() || !rest.first().isDigit()) break
+    }
+    if (!consumed || total <= 0 || total > 100_000_000_000) return null
+    return total.roundToLong() to rest
+}
+
 fun parseAmount(number: String, unit: String?): Long? {
     val value = number.toDoubleOrNull() ?: return null
     if (value < 0) return null
