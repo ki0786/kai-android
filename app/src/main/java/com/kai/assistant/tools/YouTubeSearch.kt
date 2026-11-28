@@ -49,20 +49,41 @@ internal fun youtubeOpenUrl(query: String): String {
 
 internal fun youtubeWatchUrl(videoId: String): String = "https://www.youtube.com/watch?v=$videoId"
 
-/** First video in a YouTube search page or innertube response. */
+/**
+ * First search-result video. YouTube pages often store the id as `\x22videoId\x22`.
+ * A bare `videoId` later in the page can be a radio mix, so a videoRenderer wins.
+ */
 internal fun firstYouTubeVideoId(page: String): String? {
-    val renderer = Regex(""""videoRenderer"\s*:\s*\{"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""")
-    renderer.find(page)?.groupValues?.get(1)?.let { return it }
-    return Regex(""""videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""").find(page)?.groupValues?.get(1)
+    val text = unescapeYouTubeMarkup(page)
+    val renderer = Regex(
+        """"videoRenderer"\s*:\s*\{"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""" +
+            """|"compactVideoRenderer"\s*:\s*\{"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""",
+    )
+    renderer.find(text)?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }?.let { return it }
+    return Regex(""""videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""").find(text)?.groupValues?.get(1)
 }
 
-/** Android innertube search. No provider key. The public web client needs one; this client does not. */
+internal fun unescapeYouTubeMarkup(page: String): String {
+    if (!page.contains("\\x") && !page.contains("\\u00")) return page
+    val hex = Regex("""\\x([0-9a-fA-F]{2})""")
+    var text = hex.replace(page) { match -> match.groupValues[1].toInt(16).toChar().toString() }
+    text = text.replace("\\u0026", "&").replace("\\u003d", "=").replace("\\u003D", "=")
+    return text
+}
+
+/** Watch page for a resolved id. Playback uses this, not the search results page. */
+internal fun resolvedYouTubeWatchUrl(page: String): String? {
+    val id = firstYouTubeVideoId(page) ?: return null
+    return youtubeWatchUrl(id)
+}
+
+/** Web innertube search. No provider key. The Android client is rejected without one. */
 internal fun youTubeInnertubeBody(query: String): String {
     val escaped = query
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
         .replace("\n", " ")
-    return """{"context":{"client":{"clientName":"ANDROID","clientVersion":"19.17.34","hl":"en","gl":"US"}},"query":"$escaped"}"""
+    return """{"context":{"client":{"clientName":"WEB","clientVersion":"2.20241126.01.00","hl":"en","gl":"US"}},"query":"$escaped"}"""
 }
 
 internal fun youtubeVideoId(query: String): String? {

@@ -24,6 +24,14 @@ class PersonalControlsPhraseTest {
         assertEquals(LocalCommand.SetDoNotDisturb(false), command("disable do not disturb"))
         assertEquals(LocalCommand.AdjustVolume(2), command("volume up"))
         assertEquals(LocalCommand.AdjustVolume(-2), command("volume down"))
+        assertEquals(LocalCommand.SetVolume(75), command("set volume to 75 percent"))
+        assertEquals(LocalCommand.SetVolume(75), command("set volume to 75"))
+        assertEquals(LocalCommand.SetVolume(75), command("set volume to 75%"))
+        assertEquals(LocalCommand.SetVolume(75), command("set volme to 75 percnt"))
+        assertEquals(LocalCommand.SetVolume(75), command("set volume to seventy five percent"))
+        assertEquals(LocalCommand.SetBrightness(40), command("set brightness to 40 percent"))
+        assertEquals(LocalCommand.SetBrightness(40), command("set brightness to 40"))
+        assertEquals(LocalCommand.SetBrightness(30), command("set brightnes to 30 percent"))
         assertEquals(LocalCommand.SetVolume(0), command("mute"))
         assertEquals(LocalCommand.SetVolume(0), command("mute the music"))
         assertEquals(LocalCommand.SilencePhone, command("silent my phone"))
@@ -86,6 +94,21 @@ class PersonalControlsPhraseTest {
         val search = command("play believer on youtube") as LocalCommand.SearchYouTube
         assertEquals("believer", search.query)
         assertEquals(LocalCommand.SearchYouTube("a song"), command("play a song on youtube"))
+        assertEquals(LocalCommand.SearchYouTube("a song"), command("play a song on YouTube"))
+        assertEquals(LocalCommand.SearchYouTube("believer"), command("play believer on YouTube"))
+        assertFalse(command("open youtube") is LocalCommand.SearchYouTube)
+        assertEquals(
+            "https://www.youtube.com/watch?v=7wtfhZwyrcc",
+            resolvedYouTubeWatchUrl("""{"videoRenderer":{"videoId":"7wtfhZwyrcc","title":"Believer"}}"""),
+        )
+        assertEquals(
+            "7wtfhZwyrcc",
+            firstYouTubeVideoId("""\x22videoRenderer\x22:\x7b\x22videoId\x22:\x227wtfhZwyrcc\x22"""),
+        )
+        assertFalse(
+            resolvedYouTubeWatchUrl("""{"videoRenderer":{"videoId":"7wtfhZwyrcc"}}""")!!
+                .contains("search_query"),
+        )
         assertEquals(
             "dQw4w9WgXcQ",
             firstYouTubeVideoId("""{"videoRenderer":{"videoId":"dQw4w9WgXcQ","title":"x"}}"""),
@@ -126,8 +149,13 @@ class PersonalControlsPhraseTest {
             "torch on",
             "turn on do not disturb",
             "volume down",
+            "set volume to 75 percent",
+            "set volume to 75",
+            "set volme to 75 percnt",
             "mute",
             "silent my phone",
+            "set brightness to 40 percent",
+            "brightness down",
             "mute my phone",
             "brightness up",
             "turn off wifi",

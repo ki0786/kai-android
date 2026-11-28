@@ -23,7 +23,7 @@ class LocalIntentRouter {
         matchDateTime(text)?.let { return it }
         matchConnectivity(text)?.let { return it }
         matchLatestNotification(text)?.let { return it }
-        matchPersonalControls(text)?.let { return it }
+        matchPersonalControls(numeric)?.let { return it }
         matchSilence(text)?.let { return it }
         matchSettings(text)?.let { return it }
         matchVolume(numeric)?.let { return it }
@@ -101,6 +101,11 @@ class LocalIntentRouter {
             """increase|decrease|reduce|raise|lower|change|set|adjust)\b""",
     )
 
+    private val brightnessLevel = Regex(
+        """^(?:set|change|turn|put|make|adjust)?\s*(?:the\s+|my\s+)?(?:screen\s+)?brightness\s+(?:to\s+|at\s+)?(\d{1,3})\s*(?:%|percent(?:age)?)?$""" +
+            """|^(\d{1,3})\s*(?:%|percent(?:age)?)\s+brightness$""",
+    )
+
     private val brightnessUp = Regex(
         """^(?:turn|crank|bump)\s+up\s+(?:the\s+)?(?:screen\s+)?brightness$""" +
             """|^(?:turn|crank|bump)\s+(?:the\s+)?(?:screen\s+)?brightness\s+up$""" +
@@ -173,7 +178,7 @@ class LocalIntentRouter {
             SettingsSection.Hotspot to """\bhot\s?spot\b|\btethering\b""",
             SettingsSection.Location to """\b(?:location|gps)\b""",
             SettingsSection.DoNotDisturb to """\bdo\s+not\s+disturb\b|\bdnd\b""",
-            SettingsSection.Display to """\bbrightness\b|\bdark\s+mode\b|\bdisplay\s+settings\b""",
+            SettingsSection.Display to """\bdark\s+mode\b|\bdisplay\s+settings\b|\bbrightness\s+settings\b""",
             SettingsSection.Sound to """\bsound\s+settings\b|\bringtone\b|\bsilent\s+mode\b|\bvibrate\s+mode\b""",
             SettingsSection.Battery to """\bbattery\s+(?:saver|settings)\b|\bpower\s+saving\b""",
         )
@@ -198,10 +203,14 @@ class LocalIntentRouter {
     private fun matchVolume(text: String): LocalMatch? {
         if (!Regex("""\b(volume|louder|quieter|mute|unmute|sound)\b""").containsMatchIn(text)) return null
         if (text.contains("settings")) return null
-        Regex("""^(?:set|change|turn|put|make)?\s*(?:the\s+)?(?:media\s+)?(?:volume|sound)\s+(?:to\s+|at\s+)?(\d{1,3})\s*(?:%|percent)?$""")
+        Regex(
+            """^(?:set|change|turn|put|make|adjust)?\s*(?:the\s+|my\s+)?(?:media\s+|phone\s+)?(?:volume|sound)\s+(?:to\s+|at\s+)?(\d{1,3})\s*(?:%|percent(?:age)?)?$""" +
+                """|^(\d{1,3})\s*(?:%|percent(?:age)?)\s+(?:volume|sound)$""",
+        )
             .find(text)
             ?.groupValues
-            ?.getOrNull(1)
+            ?.drop(1)
+            ?.firstOrNull { it.isNotBlank() }
             ?.toIntOrNull()
             ?.let { raw ->
                 val percent = raw.coerceIn(0, 100)
@@ -704,6 +713,10 @@ class LocalIntentRouter {
     private fun matchBrightness(text: String): LocalMatch? {
         if (isControlQuestion(text)) return null
         if (Regex("""\b(?:settings|dark\s+mode|display\s+settings)\b""").containsMatchIn(text)) return null
+        brightnessLevel.find(text)?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }?.toIntOrNull()?.let { raw ->
+            val percent = raw.coerceIn(0, 100)
+            return local(LocalCommand.SetBrightness(percent), "Setting brightness to $percent percent")
+        }
         return when {
             brightnessUp.matches(text) -> local(LocalCommand.AdjustBrightness(true), "Turning brightness up")
             brightnessDown.matches(text) -> local(LocalCommand.AdjustBrightness(false), "Turning brightness down")

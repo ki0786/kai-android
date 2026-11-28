@@ -12,7 +12,7 @@ internal const val DND_NEEDS_ACCESS =
     "I need Do Not Disturb access before I can change it. I opened that settings screen. Allow it, then ask again."
 
 internal const val BRIGHTNESS_NEEDS_ACCESS =
-    "I need permission to change brightness. I opened that settings screen. Allow it, then ask again."
+    "I need Modify system settings before I can change the brightness. Allow that for KAI, then ask again."
 
 internal const val HOTSPOT_BLOCKED =
     "Android won't let an app turn the hotspot on or off."

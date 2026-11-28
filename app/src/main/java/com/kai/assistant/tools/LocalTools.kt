@@ -115,6 +115,7 @@ class LocalToolRouter(private val context: Context) {
         LocalCommand.SilencePhone -> volume.silencePhone()
         is LocalCommand.SetDoNotDisturb -> doNotDisturb.setEnabled(command.enabled)
         is LocalCommand.AdjustBrightness -> brightness.adjust(command.up)
+        is LocalCommand.SetBrightness -> brightness.setPercent(command.percent)
         is LocalCommand.SetWifi -> radios.wifi(command.enabled)
         is LocalCommand.SetBluetooth -> radios.bluetooth(command.enabled)
         is LocalCommand.MediaControl -> media.control(command.action)
@@ -424,22 +425,26 @@ class LaunchAppTool(private val context: Context) {
 
     fun searchYouTube(query: String): ToolResult {
         val videoId = youtubeVideoId(query) ?: fetchFirstVideoId(query)
-        val playing = videoId != null
-        val uri = Uri.parse(if (videoId != null) youtubeWatchUrl(videoId) else youtubeResultsUrl(query))
-        val youtube = Intent(Intent.ACTION_VIEW, uri).apply {
+            ?: return ToolResult.Error("I couldn't start that video on YouTube.")
+        val play = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId")).apply {
+            setPackage(YOUTUBE_PACKAGE)
+            putExtra("VIDEO_ID", videoId)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val watch = Intent(Intent.ACTION_VIEW, Uri.parse(youtubeWatchUrl(videoId))).apply {
             setPackage(YOUTUBE_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val view = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val browser = Intent(Intent.ACTION_VIEW, Uri.parse(youtubeWatchUrl(videoId)))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching {
-            if (youtube.resolveActivity(context.packageManager) != null) {
-                startInFront(youtube)
-            } else {
-                startInFront(view)
+            val pm = context.packageManager
+            when {
+                play.resolveActivity(pm) != null -> startInFront(play)
+                watch.resolveActivity(pm) != null -> startInFront(watch)
+                else -> startInFront(browser)
             }
-            ToolResult.Ok(
-                if (playing) "Playing that on YouTube." else "I couldn't start a video, so I opened the YouTube search.",
-            )
+            ToolResult.Ok("Playing that on YouTube.")
         }.getOrElse {
             ToolResult.Error("I couldn't open YouTube.")
         }
@@ -449,7 +454,8 @@ class LaunchAppTool(private val context: Context) {
         val client = youtubeClient
         val innertube = Request.Builder()
             .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
-            .header("User-Agent", "com.google.android.youtube/19.17.34 (Linux; U; Android 16) gzip")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36")
+            .header("Content-Type", "application/json")
             .post(youTubeInnertubeBody(query).toRequestBody("application/json".toMediaType()))
             .build()
         val fromApi = runCatching {
@@ -464,6 +470,8 @@ class LaunchAppTool(private val context: Context) {
                 "User-Agent",
                 "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             )
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Cookie", "CONSENT=YES+cb")
             .build()
         return runCatching {
             client.newCall(page).execute().use { response ->
@@ -494,7 +502,7 @@ class LaunchAppTool(private val context: Context) {
     private companion object {
         const val YOUTUBE_PACKAGE = "com.google.android.youtube"
         val youtubeClient: OkHttpClient = OkHttpClient.Builder()
-            .callTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 }

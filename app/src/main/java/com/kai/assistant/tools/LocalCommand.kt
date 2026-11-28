@@ -23,6 +23,8 @@ sealed class LocalCommand {
     data class SetDoNotDisturb(val enabled: Boolean) : LocalCommand()
     /** [up] raises the screen brightness one step. */
     data class AdjustBrightness(val up: Boolean) : LocalCommand()
+    /** Screen brightness as a percent of the system range. Turns automatic mode off. */
+    data class SetBrightness(val percent: Int) : LocalCommand()
     data class SetWifi(val enabled: Boolean) : LocalCommand()
     data class SetBluetooth(val enabled: Boolean) : LocalCommand()
     data class MediaControl(val action: MediaAction) : LocalCommand()
@@ -186,6 +188,7 @@ fun LocalCommand.staysOnDevice(): Boolean =
         this is LocalCommand.SilencePhone ||
         this is LocalCommand.SetDoNotDisturb ||
         this is LocalCommand.AdjustBrightness ||
+        this is LocalCommand.SetBrightness ||
         this is LocalCommand.SetWifi ||
         this is LocalCommand.SetBluetooth ||
         this is LocalCommand.MediaControl ||

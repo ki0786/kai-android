@@ -8,7 +8,6 @@ import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -63,18 +62,22 @@ internal class DoNotDisturbTool(private val context: Context) {
 
 internal class BrightnessTool(private val context: Context) {
     fun adjust(up: Boolean): ToolResult {
-        if (!Settings.System.canWrite(context)) {
-            val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
-                data = Uri.parse("package:${context.packageName}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val opened = runCatching { context.startActivity(intent) }.isSuccess
-            return if (opened) {
-                ToolResult.Ok(BRIGHTNESS_NEEDS_ACCESS)
-            } else {
-                ToolResult.Error("I need permission to change brightness, and I couldn't open that settings screen.")
-            }
-        }
+        if (!canWrite()) return ToolResult.Ok(BRIGHTNESS_NEEDS_ACCESS)
+        val current = readLevel()
+        return writeLevel(steppedBrightness(current, up))
+    }
+
+    fun setPercent(percent: Int): ToolResult {
+        if (!canWrite()) return ToolResult.Ok(BRIGHTNESS_NEEDS_ACCESS)
+        return writeLevel(indexForPercent(percent, 1, BRIGHTNESS_MAX))
+    }
+
+    private fun canWrite(): Boolean = Settings.System.canWrite(context)
+
+    private fun readLevel(): Int =
+        Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+
+    private fun writeLevel(level: Int): ToolResult {
         return runCatching {
             val resolver = context.contentResolver
             val mode = Settings.System.getInt(
@@ -91,11 +94,11 @@ internal class BrightnessTool(private val context: Context) {
                 )
                 if (!wroteMode) return ToolResult.Error("I couldn't turn off automatic brightness.")
             }
-            val current = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
-            val next = steppedBrightness(current, up)
-            val wrote = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, next)
+            val wrote = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level)
             if (!wrote) return ToolResult.Error("I couldn't change the brightness.")
-            ToolResult.Ok(brightnessSpoken(current, next, automatic))
+            val now = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level)
+            val spoken = "Brightness is ${brightnessPercent(now)}%."
+            ToolResult.Ok(if (automatic) "$spoken Automatic brightness is off." else spoken)
         }.getOrElse { ToolResult.Error("I couldn't change the brightness.") }
     }
 }
