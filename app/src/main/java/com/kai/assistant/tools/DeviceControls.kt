@@ -108,8 +108,8 @@ internal const val FILTER_NONE = 3
 internal const val FILTER_ALARMS = 4
 
 /**
- * Silent sets the ringer to silent and the ring stream to zero.
- * It does not request a zen, interruption-filter, or notification-policy change.
+ * Silent sets ringer mode silent and ring volume 0. It does not request zen.
+ * A ringer write on this phone can turn zen on; that is cleared afterwards.
  */
 internal data class SilentSideEffects(
     val setsRingerModeSilent: Boolean,
@@ -120,14 +120,24 @@ internal data class SilentSideEffects(
 
 internal fun silentSideEffects(): SilentSideEffects = SilentSideEffects(
     setsRingerModeSilent = true,
-    setsInterruptionFilter = false,
+    setsInterruptionFilter = true,
     setsZenMode = false,
     setsNotificationPolicy = false,
 )
 
-/** "Phone is silent." only after the ringer reads silent and the ring stream is 0. */
-internal fun silentSpeech(mode: Int, ringVolume: Int): String? =
-    if (mode == RINGER_SILENT && ringVolume == 0) PHONE_SILENT else null
+internal const val ZEN_OFF = 0
+
+/** Silent never asks for zen mode. Zen is forced off unless the user asked for DND. */
+internal fun silentRequestsZen(): Boolean = false
+
+internal fun shouldForceZenOff(explicitUserDoNotDisturb: Boolean): Boolean = !explicitUserDoNotDisturb
+
+/** Spoken only when the phone is silent, the ring stream is 0, and zen is off. */
+internal fun isSilentEndState(mode: Int, ringVolume: Int, zenMode: Int): Boolean =
+    mode == RINGER_SILENT && ringVolume == 0 && zenMode == ZEN_OFF
+
+internal fun silentSpeech(mode: Int, ringVolume: Int, zenMode: Int): String? =
+    if (isSilentEndState(mode, ringVolume, zenMode)) PHONE_SILENT else null
 
 /** The ringer is audible only in normal mode with the ring stream above 0. */
 internal fun ringerIsAudible(mode: Int, ringVolume: Int): Boolean =
