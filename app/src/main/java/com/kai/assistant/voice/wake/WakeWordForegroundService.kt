@@ -24,7 +24,7 @@ import java.io.File
 
 /**
  * Always-on "Hey KAI" listener. The microphone is held only while spotting the wake
- * word. A hit releases it, chimes, and listens for the command without opening KAI.
+ * word. A hit releases it and listens for the command, with no chime, without opening KAI.
  */
 class WakeWordForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -198,7 +198,6 @@ class WakeWordForegroundService : Service() {
             if (heard && loop) {
                 runKeywordHandoff(
                     releaseMic = { mic.release() },
-                    chime = { WakeChime.play(this) },
                     startListening = { WakeCommandSession.start(this) },
                 )
             }

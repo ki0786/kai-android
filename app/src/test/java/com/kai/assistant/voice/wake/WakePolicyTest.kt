@@ -254,14 +254,13 @@ class WakePolicyTest {
     }
 
     @Test
-    fun detectReleasesTheMicBeforeTheChime() {
+    fun detectReleasesTheMicThenListensQuietly() {
         val steps = mutableListOf<String>()
         runKeywordHandoff(
             releaseMic = { steps += "release" },
-            chime = { steps += "chime" },
             startListening = { steps += "listen" },
         )
-        assertEquals(listOf("release", "chime", "listen"), steps)
+        assertEquals(listOf("release", "listen"), steps)
     }
 
     @Test

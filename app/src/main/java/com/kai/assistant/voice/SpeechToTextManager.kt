@@ -51,6 +51,7 @@ class SpeechToTextManager(
             ensureRecognizer(preferOnDevice = !fellBack)
             if (!listening.compareAndSet(false, true)) return@post
             onListeningChanged(true)
+            MicEarconSilence.coverStart(appContext)
             val started = runCatching { recognizer?.startListening(listenIntent()) }
             if (started.isFailure && usingOnDevice && !fellBack) {
                 fellBack = true
@@ -74,12 +75,14 @@ class SpeechToTextManager(
     fun stopListening() {
         mainHandler.post {
             if (!listening.get()) return@post
+            MicEarconSilence.coverStop(appContext)
             runCatching { recognizer?.stopListening() }
         }
     }
 
     fun cancel() {
         mainHandler.post {
+            MicEarconSilence.coverStop(appContext)
             listening.set(false)
             onListeningChanged(false)
             runCatching { recognizer?.cancel() }
@@ -126,15 +129,20 @@ class SpeechToTextManager(
         }
         recognizer = created.also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) = Unit
+                override fun onReadyForSpeech(params: Bundle?) {
+                    MicEarconSilence.coverReady(appContext)
+                }
                 override fun onBeginningOfSpeech() {
                     onSpeechStarted()
                 }
                 override fun onRmsChanged(rmsdB: Float) = Unit
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
-                override fun onEndOfSpeech() = Unit
+                override fun onEndOfSpeech() {
+                    MicEarconSilence.coverStop(appContext)
+                }
 
                 override fun onError(error: Int) {
+                    MicEarconSilence.coverStop(appContext)
                     listening.set(false)
                     onListeningChanged(false)
                     // Ignore cancel/no-match when user released without speaking.
@@ -149,6 +157,7 @@ class SpeechToTextManager(
                 }
 
                 override fun onResults(results: Bundle?) {
+                    MicEarconSilence.coverStop(appContext)
                     listening.set(false)
                     onListeningChanged(false)
                     val text = results

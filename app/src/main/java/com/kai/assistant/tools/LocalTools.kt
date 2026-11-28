@@ -694,9 +694,9 @@ class VolumeTool(private val context: Context) {
     }
 
     /**
-     * Saves the current ringer, sets silent mode and ring volume 0, then forces
-     * zen off. Clearing zen can put the phone back on vibrate, so silent is set
-     * again. The spoken line requires all three readbacks.
+     * Mutes the ring stream. Does not call setRingerMode(SILENT): on this phone
+     * that becomes vibrate and turns zen on. Zen and the interruption filter are
+     * forced off before the reply, including when the mute did not stick.
      */
     fun silencePhone(): ToolResult {
         val stream = AudioManager.STREAM_RING
@@ -704,33 +704,17 @@ class VolumeTool(private val context: Context) {
         val explicitDnd = memory.snapshot().explicitDnd
         memory.rememberBeforeSilence(audio.ringerMode, audio.getStreamVolume(stream), doNotDisturbOn())
         forceStreamVolume(stream, 0)
-        // The public setter on this phone turns zen on and leaves vibrate.
-        // Prefer the hidden setter, then clear zen, then set silent again.
-        if (!setRingerModeInternal(AudioManager.RINGER_MODE_SILENT)) {
-            forceRingerMode(AudioManager.RINGER_MODE_SILENT)
-        }
-        if (shouldForceZenOff(explicitDnd)) {
-            forceZenOff()
-            setRingerModeInternal(AudioManager.RINGER_MODE_SILENT)
-            forceStreamVolume(stream, 0)
-            if (readZen() != ZEN_OFF || audio.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                forceZenOff()
-                setRingerModeInternal(AudioManager.RINGER_MODE_SILENT)
-                forceStreamVolume(stream, 0)
-            }
-        }
-        var mode = audio.ringerMode
+        if (shouldForceZenOff()) clearDoNotDisturb()
         var volume = audio.getStreamVolume(stream)
         var zen = readZen()
-        val readStart = SystemClock.elapsedRealtime()
-        while (SystemClock.elapsedRealtime() - readStart < 300 && !isSilentEndState(mode, volume, zen)) {
-            Thread.sleep(40)
-            mode = audio.ringerMode
-            volume = audio.getStreamVolume(stream)
-            zen = readZen()
-        }
-        memory.setAppEnabledDnd(appEnabledDndAfterSilence(explicitDnd, zen != ZEN_OFF))
-        val speech = silentSpeech(mode, volume, zen)
+        var filterAll = interruptionFilterAll()
+        if (volume != 0) forceStreamVolume(stream, 0)
+        if (zen != ZEN_OFF || !filterAll) clearDoNotDisturb()
+        volume = audio.getStreamVolume(stream)
+        zen = readZen()
+        filterAll = interruptionFilterAll()
+        memory.setAppEnabledDnd(appEnabledDndAfterSilence(explicitDnd, zen != ZEN_OFF || !filterAll))
+        val speech = silentSpeech(volume, zen, filterAll)
         return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error("I couldn't silence the ringer.")
     }
 
@@ -782,29 +766,20 @@ class VolumeTool(private val context: Context) {
         }
     }
 
-    /**
-     * Hidden setter. The public one on this phone is Do Not Disturb and leaves
-     * the ringer on vibrate, so the second silent write must not use it.
-     */
-    private fun setRingerModeInternal(mode: Int): Boolean {
-        val invoked = runCatching {
-            val method = AudioManager::class.java.getMethod(
-                "setRingerModeInternal",
-                Int::class.javaPrimitiveType,
-            )
-            method.invoke(audio, mode)
-            true
-        }.getOrDefault(false)
-        if (!invoked) {
-            runCatching {
-                Settings.Global.putInt(context.contentResolver, "mode_ringer", mode)
-            }
-        }
-        return invoked
-    }
-
     private fun readZen(): Int =
         runCatching { Settings.Global.getInt(context.contentResolver, "zen_mode", ZEN_OFF) }.getOrDefault(ZEN_OFF)
+
+    /** Interruption filter ALL and zen off. Does not open a settings screen. */
+    private fun clearDoNotDisturb() {
+        forceZenOff()
+        if (readZen() == ZEN_OFF && interruptionFilterAll()) return
+        forceZenOff()
+    }
+
+    private fun interruptionFilterAll(): Boolean = !interruptionIsDnd(notificationManager())
+
+    private fun notificationManager(): NotificationManager? =
+        context.getSystemService(NotificationManager::class.java)
 
     /** Interruption filter ALL and zen off. Does not open a settings screen. */
     private fun forceZenOff() {

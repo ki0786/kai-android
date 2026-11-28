@@ -20,12 +20,11 @@ import kotlinx.coroutines.launch
 
 /**
  * Hears the command after Hey KAI without bringing [com.kai.assistant.MainActivity]
- * forward. The chime and the listening notification are already running.
+ * forward. There is no chime. The listening notification is already showing.
  * After the reply, the mic stays open for a few seconds. Speech during the
  * reply stops playback and becomes the next command.
  */
 internal object WakeCommandSession {
-    private const val CHIME_GAP_MS = 350L
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -59,11 +58,11 @@ internal object WakeCommandSession {
             if (token != generation) return@post
             ensure(app)
             stt?.cancel()
-            main.postDelayed({
-                if (token != generation) return@postDelayed
+            main.post {
+                if (token != generation) return@post
                 listeningArmed = true
                 stt?.startListening()
-            }, CHIME_GAP_MS)
+            }
         }
     }
 

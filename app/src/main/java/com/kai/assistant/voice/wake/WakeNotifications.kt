@@ -30,6 +30,8 @@ internal object WakeNotifications {
                 ).apply {
                     description = "Shows while KAI is listening for Hey KAI"
                     setShowBadge(false)
+                    setSound(null, null)
+                    enableVibration(false)
                 },
             )
         }
@@ -79,6 +81,8 @@ internal object WakeNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .setVibrate(null)
+            .setSound(null)
             .setContentIntent(open)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -133,6 +137,9 @@ internal object WakeNotifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
+            .setSilent(true)
+            .setVibrate(null)
+            .setSound(null)
             .setTimeoutAfter(20_000)
         if (canUseFullScreen(context)) {
             builder.setFullScreenIntent(pending, true)
