@@ -1,6 +1,7 @@
 package com.kai.assistant.tools
 
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.os.SystemClock
@@ -28,18 +29,19 @@ internal class RadioSwitch(private val context: Context) {
     }
 
     fun bluetooth(enabled: Boolean): ToolResult {
-        if (bluetoothIs(enabled) == true) return ToolResult.Ok(radioSpoken("Bluetooth", enabled))
+        if (bluetoothIs(enabled) == true) return spokenBluetooth(enabled)
         directBluetooth(enabled)
-        if (waitUntil { bluetoothIs(enabled) == true }) {
-            return ToolResult.Ok(radioSpoken("Bluetooth", enabled))
-        }
-        val tile = QuickSettingsToggle.toggle(listOf("bluetooth"), enabled)
-        if (tile && (waitUntil(timeoutMs = 1_500) { bluetoothIs(enabled) == true } || bluetoothIs(enabled) == null)) {
-            return ToolResult.Ok(radioSpoken("Bluetooth", enabled))
-        }
-        val now = bluetoothIs(enabled)
-        if (now == true) return ToolResult.Ok(radioSpoken("Bluetooth", enabled))
+        if (waitUntil { bluetoothIs(enabled) == true }) return spokenBluetooth(enabled)
+        // Public enable/disable is a no-op for an app targeting 35. The tile is
+        // the path that still changes the adapter. The shade is closed either way.
+        QuickSettingsToggle.toggle(listOf("bluetooth", "blue tooth"), enabled)
+        if (waitUntil(timeoutMs = 2_000) { bluetoothIs(enabled) == true }) return spokenBluetooth(enabled)
         return ToolResult.Error(radioFailed("Bluetooth", enabled))
+    }
+
+    private fun spokenBluetooth(enabled: Boolean): ToolResult {
+        val speech = radioSpeechForReadback("Bluetooth", enabled, bluetoothIs(enabled))
+        return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error(radioFailed("Bluetooth", enabled))
     }
 
     @Suppress("DEPRECATION")
@@ -59,7 +61,7 @@ internal class RadioSwitch(private val context: Context) {
 
     @Suppress("DEPRECATION")
     private fun directBluetooth(enabled: Boolean) {
-        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
+        val adapter = adapter() ?: return
         runCatching {
             if (enabled) adapter.enable() else adapter.disable()
         }
@@ -86,9 +88,14 @@ internal class RadioSwitch(private val context: Context) {
     }
 
     @Suppress("DEPRECATION")
+    private fun adapter(): BluetoothAdapter? {
+        val manager = context.getSystemService(BluetoothManager::class.java)
+        return manager?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+    }
+
+    @Suppress("DEPRECATION")
     private fun bluetoothIs(enabled: Boolean): Boolean? {
-        val adapter = BluetoothAdapter.getDefaultAdapter()
-        val fromAdapter = adapter?.let { runCatching { it.isEnabled }.getOrNull() }
+        val fromAdapter = adapter()?.let { runCatching { it.isEnabled }.getOrNull() }
         val on = fromAdapter ?: runCatching {
             Settings.Global.getInt(context.contentResolver, Settings.Global.BLUETOOTH_ON, 0) == 1
         }.getOrNull() ?: return null

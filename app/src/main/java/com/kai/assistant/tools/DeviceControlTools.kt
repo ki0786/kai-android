@@ -31,13 +31,25 @@ internal class RingerMemory(private val context: Context) {
     private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun rememberBeforeSilence(ringerMode: Int, ringVolume: Int, dndAlreadyOn: Boolean) {
-        val legacyOwns = !prefs.getBoolean(KEY_HAS_SESSION, false) &&
+        val hasSession = prefs.getBoolean(KEY_HAS_SESSION, false)
+        val legacyOwns = !hasSession &&
             !prefs.getBoolean(KEY_EXPLICIT_KNOWN, false) &&
             dndAlreadyOn
         val owned = prefs.getBoolean(KEY_APP_DND, false) || legacyOwns
+        val storedVolume = prefs.getInt(KEY_VOLUME, -1)
+        val volumeToKeep = when {
+            ringVolume > 0 -> ringVolume
+            hasSession && storedVolume > 0 -> storedVolume
+            else -> ringVolume
+        }
+        val modeToKeep = if (ringVolume > 0 || !hasSession) {
+            ringerMode
+        } else {
+            prefs.getInt(KEY_MODE, ringerMode)
+        }
         prefs.edit()
-            .putInt(KEY_MODE, ringerMode)
-            .putInt(KEY_VOLUME, ringVolume)
+            .putInt(KEY_MODE, modeToKeep)
+            .putInt(KEY_VOLUME, volumeToKeep)
             .putBoolean(KEY_APP_DND, owned)
             .putBoolean(KEY_HAS_SESSION, true)
             .apply()

@@ -693,41 +693,37 @@ class VolumeTool(private val context: Context) {
     }
 
     /**
-     * Zero the ringer only. [AudioManager.RINGER_MODE_SILENT] turns on zen mode
-     * on this phone, so it is never set here. A platform side effect that still
-     * enables Do Not Disturb is put back.
+     * Saves the current ringer, then sets silent mode and ring volume 0.
+     * A platform side effect that turns Do Not Disturb on is put back.
      */
     fun silencePhone(): ToolResult {
         val stream = AudioManager.STREAM_RING
         val memory = RingerMemory(context)
         val dndBefore = doNotDisturbOn()
-        memory.rememberBeforeSilence(audio.ringerMode, audio.getStreamVolume(stream), dndBefore)
-        val modeBefore = audio.ringerMode
-        runCatching { audio.setStreamVolume(stream, 0, 0) }
-        writeAudioSystem(stream, 0)
-        if (audio.ringerMode == AudioManager.RINGER_MODE_SILENT && modeBefore != AudioManager.RINGER_MODE_SILENT) {
-            runCatching { audio.ringerMode = modeBefore }
-            runCatching { audio.setStreamVolume(stream, 0, 0) }
-            writeAudioSystem(stream, 0)
-        }
+        memory.rememberBeforeSilence(audio.ringerMode, readIndex(stream), dndBefore)
+        forceStreamVolume(stream, 0)
+        forceRingerMode(AudioManager.RINGER_MODE_SILENT)
         if (shouldRevertDoNotDisturb(dndBefore, doNotDisturbOn())) {
             restoreDoNotDisturbOff()
+            forceRingerMode(AudioManager.RINGER_MODE_SILENT)
+            forceStreamVolume(stream, 0)
         }
         memory.setAppEnabledDnd(appEnabledDndAfterSilence(dndBefore, doNotDisturbOn()))
-        val silent = audio.getStreamVolume(stream) == 0
-        return if (silent) ToolResult.Ok(PHONE_SILENT) else ToolResult.Error("I couldn't silence the ringer.")
+        val speech = silentSpeech(audio.ringerMode, readIndex(stream))
+        return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error("I couldn't silence the ringer.")
     }
 
-    /** Restores the ringer. Does not call the backend. */
+    /**
+     * Normal mode and an audible ring volume. The spoken line uses the readback,
+     * not the request. Does not turn Do Not Disturb on.
+     */
     fun restoreRinger(): ToolResult {
         val stream = AudioManager.STREAM_RING
         val memory = RingerMemory(context)
         val saved = memory.snapshot()
         val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
-        val plan = planRingerRestore(saved.previousMode, saved.previousVolume, max)
-        runCatching { audio.ringerMode = plan.ringerMode }
-        runCatching { audio.setStreamVolume(stream, plan.ringVolume, 0) }
-        writeAudioSystem(stream, plan.ringVolume)
+        val plan = planRingerRestore(saved.previousVolume, max)
+        applyRinger(plan.ringerMode, plan.ringVolume)
         val turnOff = shouldTurnOffDndOnRestore(
             appEnabledDoNotDisturb = saved.appEnabledDnd,
             explicitUserDoNotDisturb = saved.explicitDnd,
@@ -735,19 +731,43 @@ class VolumeTool(private val context: Context) {
             unmarkedLegacySilent = saved.unmarkedLegacy,
         )
         var turnedOff = false
-        if (turnOff) {
-            turnedOff = restoreDoNotDisturbOff() || !doNotDisturbOn()
+        if (turnOff && !saved.explicitDnd) {
+            turnedOff = restoreDoNotDisturbOff()
             memory.clearAppEnabledDnd()
+            if (doNotDisturbOn()) turnedOff = false
+            applyRinger(plan.ringerMode, plan.ringVolume)
         }
-        val mode = audio.ringerMode
-        val volume = audio.getStreamVolume(stream)
-        val ringing = mode == AudioManager.RINGER_MODE_VIBRATE ||
-            (mode != AudioManager.RINGER_MODE_SILENT && volume > 0)
-        return if (ringing) {
-            ToolResult.Ok(ringerRestoredSpoken(turnedOff))
-        } else {
-            ToolResult.Error("I couldn't turn the ringer back on.")
+        val speech = ringerRestoreSpeech(audio.ringerMode, readIndex(stream), turnedOff && !doNotDisturbOn())
+        return if (speech != null) ToolResult.Ok(speech) else ToolResult.Error("I couldn't turn the ringer back on.")
+    }
+
+    private fun applyRinger(mode: Int, volume: Int) {
+        forceRingerMode(mode)
+        forceStreamVolume(AudioManager.STREAM_RING, volume)
+        if (audio.ringerMode != mode || readIndex(AudioManager.STREAM_RING) != volume) {
+            forceRingerMode(mode)
+            forceStreamVolume(AudioManager.STREAM_RING, volume)
         }
+    }
+
+    private fun forceRingerMode(mode: Int) {
+        repeat(2) {
+            if (audio.ringerMode == mode) return
+            runCatching { audio.ringerMode = mode }
+        }
+        if (audio.ringerMode == mode) return
+        runCatching {
+            Settings.Global.putInt(context.contentResolver, "mode_ringer", mode)
+        }
+    }
+
+    private fun forceStreamVolume(stream: Int, target: Int) {
+        audio.setStreamVolume(stream, target, 0)
+        if (readIndex(stream) != target) {
+            audio.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
+        }
+        if (readIndex(stream) != target) writeAudioSystem(stream, target)
+        if (readIndex(stream) != target) stepUntil(stream, target)
     }
 
     private fun doNotDisturbOn(): Boolean {

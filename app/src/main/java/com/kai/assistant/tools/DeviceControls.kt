@@ -108,9 +108,8 @@ internal const val FILTER_NONE = 3
 internal const val FILTER_ALARMS = 4
 
 /**
- * What "silent" is allowed to change. The ringer volume goes to zero.
- * Ringer-silent, zen mode, and notification policy stay untouched: on this
- * phone those are Do Not Disturb.
+ * Silent sets the ringer to silent and the ring stream to zero.
+ * It does not request a zen, interruption-filter, or notification-policy change.
  */
 internal data class SilentSideEffects(
     val setsRingerModeSilent: Boolean,
@@ -120,11 +119,19 @@ internal data class SilentSideEffects(
 )
 
 internal fun silentSideEffects(): SilentSideEffects = SilentSideEffects(
-    setsRingerModeSilent = false,
+    setsRingerModeSilent = true,
     setsInterruptionFilter = false,
     setsZenMode = false,
     setsNotificationPolicy = false,
 )
+
+/** "Phone is silent." only after the ringer reads silent and the ring stream is 0. */
+internal fun silentSpeech(mode: Int, ringVolume: Int): String? =
+    if (mode == RINGER_SILENT && ringVolume == 0) PHONE_SILENT else null
+
+/** The ringer is audible only in normal mode with the ring stream above 0. */
+internal fun ringerIsAudible(mode: Int, ringVolume: Int): Boolean =
+    mode == RINGER_NORMAL && ringVolume > 0
 
 internal fun isDoNotDisturbFilter(filter: Int): Boolean =
     filter == FILTER_PRIORITY || filter == FILTER_NONE || filter == FILTER_ALARMS
@@ -158,26 +165,37 @@ internal data class RingerRestorePlan(
     val ringVolume: Int,
 )
 
-/** Puts the ringer back. A saved silent mode becomes normal so the phone can ring. */
-internal fun planRingerRestore(previousMode: Int?, previousVolume: Int?, maxVolume: Int): RingerRestorePlan {
-    val mode = when (previousMode) {
-        RINGER_VIBRATE -> RINGER_VIBRATE
-        RINGER_NORMAL -> RINGER_NORMAL
-        else -> RINGER_NORMAL
-    }
+/**
+ * Undo always uses normal mode. A saved ring volume above 0 is restored.
+ * Zero or a missing volume becomes about half the stream (15 -> 8) so it can be heard.
+ */
+internal fun planRingerRestore(previousVolume: Int?, maxVolume: Int): RingerRestorePlan {
     val cap = maxVolume.coerceAtLeast(1)
-    val volume = when (mode) {
-        RINGER_VIBRATE -> (previousVolume ?: 0).coerceIn(0, cap)
-        else -> {
-            val saved = previousVolume ?: 0
-            (if (saved > 0) saved else cap / 2).coerceIn(1, cap)
-        }
-    }
-    return RingerRestorePlan(mode, volume)
+    val saved = previousVolume ?: 0
+    val volume = if (saved > 0) saved.coerceIn(1, cap) else fallbackRingVolume(cap)
+    return RingerRestorePlan(RINGER_NORMAL, volume)
+}
+
+/** About half. 15 becomes 8. */
+internal fun fallbackRingVolume(maxVolume: Int): Int {
+    val cap = maxVolume.coerceAtLeast(1)
+    return ((cap + 1) / 2).coerceIn(1, cap)
 }
 
 internal fun ringerRestoredSpoken(turnedDoNotDisturbOff: Boolean): String =
     if (turnedDoNotDisturbOff) "The ringer is on. Do Not Disturb is off." else "The ringer is on."
+
+/** Null when the readback is still silent, vibrate, or volume 0. */
+internal fun ringerRestoreSpeech(mode: Int, ringVolume: Int, turnedDoNotDisturbOff: Boolean): String? {
+    if (!ringerIsAudible(mode, ringVolume)) return null
+    return ringerRestoredSpoken(turnedDoNotDisturbOff)
+}
+
+/** "Bluetooth is on." only when the adapter readback matches the request. */
+internal fun radioSpeechForReadback(label: String, wantedOn: Boolean, adapterMatches: Boolean?): String? {
+    if (adapterMatches != true) return null
+    return radioSpoken(label, wantedOn)
+}
 
 /**
  * Quick-settings tile decision. [Already] means the tile already matches,

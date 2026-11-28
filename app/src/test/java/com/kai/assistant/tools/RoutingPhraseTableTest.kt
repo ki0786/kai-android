@@ -111,7 +111,11 @@ class RoutingPhraseTableTest {
         // Settings the phone can open
         "turn on wifi" to LocalCommand.SetWifi::class,
         "turn off wi-fi" to LocalCommand.SetWifi::class,
+        "turn on bluetooth" to LocalCommand.SetBluetooth::class,
+        "bluetooth on" to LocalCommand.SetBluetooth::class,
+        "enable bluetooth" to LocalCommand.SetBluetooth::class,
         "turn off bluetooth" to LocalCommand.SetBluetooth::class,
+        "bluetooth off" to LocalCommand.SetBluetooth::class,
         "open settings" to LocalCommand.OpenSystemSettings::class,
         "turn on mobile data" to LocalCommand.OpenSystemSettings::class,
         "turn on airplane mode" to LocalCommand.OpenSystemSettings::class,

@@ -2,6 +2,7 @@ package com.kai.assistant.tools
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,10 +16,13 @@ class SilentRingerTest {
     @Test
     fun silentDoesNotImplyDoNotDisturb() {
         val effects = silentSideEffects()
-        assertFalse(effects.setsRingerModeSilent)
+        assertTrue(effects.setsRingerModeSilent)
         assertFalse(effects.setsInterruptionFilter)
         assertFalse(effects.setsZenMode)
         assertFalse(effects.setsNotificationPolicy)
+        assertEquals(PHONE_SILENT, silentSpeech(RINGER_SILENT, 0))
+        assertNull(silentSpeech(RINGER_VIBRATE, 0))
+        assertNull(silentSpeech(RINGER_NORMAL, 0))
         assertFalse(shouldRevertDoNotDisturb(dndBefore = false, dndAfterWrite = false))
         assertTrue(shouldRevertDoNotDisturb(dndBefore = false, dndAfterWrite = true))
         assertFalse(appEnabledDndAfterSilence(dndBefore = false, dndAfterRevert = false))
@@ -64,16 +68,17 @@ class SilentRingerTest {
         }
         assertEquals(LocalCommand.SetDoNotDisturb(false), router.match("turn off dnd")!!.command)
 
-        val fromSilent = planRingerRestore(RINGER_NORMAL, 7, maxVolume = 15)
-        assertEquals(RINGER_NORMAL, fromSilent.ringerMode)
-        assertEquals(7, fromSilent.ringVolume)
+        val kept = planRingerRestore(7, maxVolume = 15)
+        assertEquals(RINGER_NORMAL, kept.ringerMode)
+        assertEquals(7, kept.ringVolume)
 
-        val wasSilent = planRingerRestore(RINGER_SILENT, 0, maxVolume = 10)
-        assertEquals(RINGER_NORMAL, wasSilent.ringerMode)
-        assertEquals(5, wasSilent.ringVolume)
+        val missing = planRingerRestore(null, maxVolume = 15)
+        assertEquals(RINGER_NORMAL, missing.ringerMode)
+        assertEquals(8, missing.ringVolume)
 
-        val vibrate = planRingerRestore(RINGER_VIBRATE, 0, maxVolume = 10)
-        assertEquals(RINGER_VIBRATE, vibrate.ringerMode)
+        val wasZero = planRingerRestore(0, maxVolume = 15)
+        assertEquals(RINGER_NORMAL, wasZero.ringerMode)
+        assertEquals(8, wasZero.ringVolume)
 
         assertTrue(
             shouldTurnOffDndOnRestore(
@@ -112,5 +117,22 @@ class SilentRingerTest {
             "The ringer is on. Do Not Disturb is off.",
             ringerRestoredSpoken(turnedDoNotDisturbOff = true),
         )
+    }
+
+    @Test
+    fun ringerOnRequiresNormalModeAndVolume() {
+        assertNull(ringerRestoreSpeech(RINGER_NORMAL, 0, turnedDoNotDisturbOff = false))
+        assertNull(ringerRestoreSpeech(RINGER_SILENT, 8, turnedDoNotDisturbOff = false))
+        assertNull(ringerRestoreSpeech(RINGER_VIBRATE, 8, turnedDoNotDisturbOff = false))
+        assertNull(ringerRestoreSpeech(RINGER_VIBRATE, 0, turnedDoNotDisturbOff = false))
+        assertEquals("The ringer is on.", ringerRestoreSpeech(RINGER_NORMAL, 8, turnedDoNotDisturbOff = false))
+        assertEquals(
+            "The ringer is on. Do Not Disturb is off.",
+            ringerRestoreSpeech(RINGER_NORMAL, 7, turnedDoNotDisturbOff = true),
+        )
+        assertFalse(ringerIsAudible(RINGER_VIBRATE, 8))
+        assertFalse(ringerIsAudible(RINGER_SILENT, 1))
+        assertFalse(ringerIsAudible(RINGER_NORMAL, 0))
+        assertTrue(ringerIsAudible(RINGER_NORMAL, 1))
     }
 }

@@ -54,8 +54,10 @@ class PersonalControlsPhraseTest {
         assertEquals(LocalCommand.SetWifi(true), command("turn on wifi"))
         assertEquals(LocalCommand.SetWifi(false), command("turn off wi-fi"))
         assertEquals(LocalCommand.SetWifi(true), command("wifi on"))
-        assertEquals(LocalCommand.SetBluetooth(false), command("turn off bluetooth"))
+        assertEquals(LocalCommand.SetBluetooth(true), command("turn on bluetooth"))
+        assertEquals(LocalCommand.SetBluetooth(true), command("bluetooth on"))
         assertEquals(LocalCommand.SetBluetooth(true), command("enable bluetooth"))
+        assertEquals(LocalCommand.SetBluetooth(false), command("turn off bluetooth"))
         assertEquals(LocalCommand.SetBluetooth(false), command("bluetooth off"))
     }
 
@@ -169,7 +171,11 @@ class PersonalControlsPhraseTest {
             "mute my phone",
             "brightness up",
             "turn off wifi",
+            "turn on bluetooth",
             "bluetooth on",
+            "enable bluetooth",
+            "turn off bluetooth",
+            "bluetooth off",
             "play",
             "pause",
             "next song",
@@ -197,6 +203,10 @@ class PersonalControlsPhraseTest {
         assertFalse(healthUrl("http://10.0.0.8:8000").contains("localhost"))
 
         assertEquals("Bluetooth is on.", radioSpoken("Bluetooth", true))
+        assertEquals("Bluetooth is on.", radioSpeechForReadback("Bluetooth", wantedOn = true, adapterMatches = true))
+        assertEquals("Bluetooth is off.", radioSpeechForReadback("Bluetooth", wantedOn = false, adapterMatches = true))
+        assertNull(radioSpeechForReadback("Bluetooth", wantedOn = true, adapterMatches = false))
+        assertNull(radioSpeechForReadback("Bluetooth", wantedOn = true, adapterMatches = null))
         assertEquals("Wi-Fi is off.", radioSpoken("Wi-Fi", false))
         assertEquals("I couldn't turn Bluetooth on.", radioFailed("Bluetooth", true))
         assertEquals(15, indexForPercent(100, 0, 15))
